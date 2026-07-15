@@ -10,6 +10,7 @@ import {
 } from "vue-router";
 
 import AppShell from "../components/common/AppShell.vue";
+import CommunityCommentSection from "../components/community/CommunityCommentSection.vue";
 
 import {
   deleteCommunityPost,
@@ -28,12 +29,6 @@ const deleteModalOpen = ref(false);
 const deletePassword = ref("");
 const deleteError = ref("");
 const deleting = ref(false);
-
-/*
- * 댓글 목록 API가 연결되면 이 배열에
- * 실제 응답 데이터를 넣으면 된다.
- */
-const comments = ref([]);
 
 const postId = computed(() => {
   return route.params.postId;
@@ -78,7 +73,8 @@ const formatDate = (dateString) => {
     return "";
   }
 
-  const date = new Date(dateString);
+  const date =
+    new Date(dateString);
 
   if (
     Number.isNaN(
@@ -122,6 +118,17 @@ const loadPost = async () => {
   } finally {
     loading.value = false;
   }
+};
+
+const handleCommentCountChange = (
+  count,
+) => {
+  if (!post.value) {
+    return;
+  }
+
+  post.value.commentCount =
+    Number(count);
 };
 
 const goBack = () => {
@@ -210,6 +217,9 @@ watch(
   postId,
   () => {
     deleteModalOpen.value = false;
+    deletePassword.value = "";
+    deleteError.value = "";
+
     loadPost();
   },
   {
@@ -382,46 +392,12 @@ watch(
           </button>
         </section>
 
-        <section class="comment-section">
-          <h2>
-            댓글
-            {{ post.commentCount }}
-          </h2>
-
-          <div
-            v-if="comments.length > 0"
-            class="comment-list"
-          >
-            <article
-              v-for="comment in comments"
-              :key="comment.id"
-              class="comment-card"
-            >
-              <p>
-                {{ comment.content }}
-              </p>
-
-              <small>
-                {{ comment.nickname }}
-                ·
-                {{
-                  formatDate(
-                    comment.createdAt,
-                  )
-                }}
-              </small>
-            </article>
-          </div>
-
-          <div
-            v-else
-            class="comment-empty"
-          >
-            <p>
-              아직 표시할 댓글이 없습니다.
-            </p>
-          </div>
-        </section>
+        <CommunityCommentSection
+          :post-id="postId"
+          @count-change="
+            handleCommentCountChange
+          "
+        />
       </section>
 
       <div
@@ -458,8 +434,9 @@ watch(
           </div>
 
           <p class="modal-description">
-            작성할 때 설정한 비밀번호를 입력해주세요.
-            삭제한 게시글은 복구할 수 없습니다.
+            작성할 때 설정한 비밀번호를
+            입력해주세요. 삭제한 게시글은
+            복구할 수 없습니다.
           </p>
 
           <form
@@ -788,72 +765,6 @@ watch(
     var(
       --color-primary,
       #0d9f8c
-    );
-}
-
-.comment-section {
-  margin-top: 34px;
-}
-
-.comment-section h2 {
-  margin: 0 0 16px;
-  color:
-    var(
-      --color-text,
-      #173b38
-    );
-  font-size: 15px;
-}
-
-.comment-list {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.comment-card,
-.comment-empty {
-  padding: 16px 18px;
-  border-radius: 12px;
-  background: #f8fcfb;
-}
-
-.comment-card p,
-.comment-empty p {
-  margin: 0;
-  color:
-    var(
-      --color-text,
-      #173b38
-    );
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.comment-card small {
-  display: block;
-  margin-top: 6px;
-  color:
-    var(
-      --color-text-muted,
-      #8fa09d
-    );
-  font-size: 10px;
-}
-
-.comment-empty {
-  color:
-    var(
-      --color-text-muted,
-      #8fa09d
-    );
-}
-
-.comment-empty p {
-  color:
-    var(
-      --color-text-muted,
-      #8fa09d
     );
 }
 
