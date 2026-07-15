@@ -2,8 +2,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "LocalHub API"
-    database_url: str = "sqlite:///./data/localhub.db"
+    app_name: str = "ToiletSpot API"
+    database_url: str = "sqlite:///./data/toiletspot.db"
     frontend_url: str = "http://localhost:5173"
     openai_api_key: str = ""
 
