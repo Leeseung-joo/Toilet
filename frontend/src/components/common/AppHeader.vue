@@ -6,14 +6,18 @@ defineProps({
     type: String,
     default: "",
   },
+
+  chatbotOpen: {
+    type: Boolean,
+    default: false,
+  },
 });
 
+const emit = defineEmits([
+  "toggle-chatbot",
+]);
+
 const navigationItems = [
-  {
-    key: "chatbot",
-    label: "AI 챗봇",
-    to: "/chatbot",
-  },
   {
     key: "community",
     label: "커뮤니티",
@@ -53,6 +57,22 @@ const navigationItems = [
         class="app-header__navigation"
         aria-label="주요 메뉴"
       >
+        <button
+          type="button"
+          class="app-header__nav-item"
+          :class="{
+            'app-header__nav-item--active':
+              chatbotOpen,
+          }"
+          :aria-expanded="chatbotOpen"
+          aria-controls="chatbot-title"
+          @click="
+            emit('toggle-chatbot')
+          "
+        >
+          AI 챗봇
+        </button>
+
         <RouterLink
           v-for="item in navigationItems"
           :key="item.key"
@@ -158,8 +178,11 @@ const navigationItems = [
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-pill);
+  border: 0;
   background: var(--color-mint-100);
   color: var(--color-primary-dark);
+  cursor: pointer;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;

@@ -1,4 +1,7 @@
 <script setup>
+import { ref } from "vue";
+
+import ChatbotWidget from "../chat/ChatbotWidget.vue";
 import AppHeader from "./AppHeader.vue";
 
 defineProps({
@@ -12,11 +15,26 @@ defineProps({
     default: false,
   },
 });
+
+const isChatbotOpen = ref(false);
+
+const toggleChatbot = () => {
+  isChatbotOpen.value =
+    !isChatbotOpen.value;
+};
+
+const closeChatbot = () => {
+  isChatbotOpen.value = false;
+};
 </script>
 
 <template>
   <div class="app-shell">
-    <AppHeader :active="active" />
+    <AppHeader
+      :active="active"
+      :chatbot-open="isChatbotOpen"
+      @toggle-chatbot="toggleChatbot"
+    />
 
     <main
       class="app-shell__content"
@@ -24,6 +42,11 @@ defineProps({
     >
       <slot />
     </main>
+
+    <ChatbotWidget
+      :open="isChatbotOpen"
+      @close="closeChatbot"
+    />
   </div>
 </template>
 

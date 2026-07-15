@@ -13,6 +13,7 @@ import BaseCard from "../components/common/BaseCard.vue";
 import BaseChip from "../components/common/BaseChip.vue";
 
 import {
+  getCommunityPostDetail,
   getCommunityPosts,
 } from "../api/communityApi.js";
 
@@ -92,6 +93,10 @@ const normalizePost = (post) => {
       post.title ??
       "제목 없음",
 
+    content:
+      post.content ??
+      "",
+
     commentCount:
       post.comment_count ?? 0,
 
@@ -120,9 +125,35 @@ const loadPosts = async (page = 1) => {
         size: pagination.size,
       });
 
-    posts.value = (
+    const normalizedPosts = (
       response?.items ?? []
     ).map(normalizePost);
+
+    posts.value = await Promise.all(
+      normalizedPosts.map(
+        async (post) => {
+          if (post.content) {
+            return post;
+          }
+
+          try {
+            const detail =
+              await getCommunityPostDetail(
+                post.id,
+              );
+
+            return normalizePost({
+              ...detail,
+              comment_count:
+                detail?.comment_count ??
+                post.commentCount,
+            });
+          } catch {
+            return post;
+          }
+        },
+      ),
+    );
 
     const pageInfo =
       response?.pagination ?? {};
@@ -397,6 +428,13 @@ onMounted(() => {
           <h2>
             {{ post.title }}
           </h2>
+
+          <p
+            v-if="post.content"
+            class="community-post-content"
+          >
+            {{ post.content }}
+          </p>
 
           <div class="community-post-footer">
             <span class="community-nickname">
@@ -749,7 +787,7 @@ onMounted(() => {
   display: -webkit-box;
   overflow: hidden;
   min-height: 52px;
-  margin: 18px 0 24px;
+  margin: 18px 0 10px;
   color:
     var(
       --color-text,
@@ -758,6 +796,23 @@ onMounted(() => {
   font-size: 18px;
   line-height: 1.45;
   letter-spacing: -0.02em;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.community-post-content {
+  display: -webkit-box;
+  overflow: hidden;
+  min-height: 44px;
+  margin: 0 0 22px;
+  color:
+    var(
+      --color-text-subtle,
+      #657976
+    );
+  font-size: 13px;
+  line-height: 1.65;
+  word-break: break-word;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
