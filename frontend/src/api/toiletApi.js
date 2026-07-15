@@ -14,8 +14,7 @@ const parseErrorMessage = async (response) => {
     if (Array.isArray(data.detail)) {
       return data.detail
         .map((error) => {
-          const field =
-            error.loc?.at(-1);
+          const field = error.loc?.at(-1);
 
           return field
             ? `${field}: ${error.msg}`
@@ -24,65 +23,125 @@ const parseErrorMessage = async (response) => {
         .join("\n");
     }
 
-    return (
-      data.message ||
-      "주변 화장실을 조회하지 못했습니다."
-    );
+    if (typeof data.message === "string") {
+      return data.message;
+    }
   } catch {
-    return "주변 화장실을 조회하지 못했습니다.";
+    // JSON이 아닌 오류 응답
   }
+
+  if (response.status === 404) {
+    return "화장실 정보를 찾을 수 없습니다.";
+  }
+
+  if (response.status === 422) {
+    return "위치 또는 화장실 ID를 확인해주세요.";
+  }
+
+  return "화장실 정보를 불러오지 못했습니다.";
 };
 
-export const getNearbyToilets = async ({
-  latitude,
-  longitude,
-  radiusMeters = 3000,
-  limit = 6,
-}) => {
-  if (
-    latitude === undefined ||
-    longitude === undefined
-  ) {
-    throw new Error(
-      "현재 위치 정보가 없습니다.",
-    );
-  }
-
-  const params =
-    new URLSearchParams({
-      latitude:
-        String(latitude),
-      longitude:
-        String(longitude),
-      radius_meters:
-        String(radiusMeters),
-      limit:
-        String(limit),
-    });
-
+const requestJson = async (
+  path,
+  options = {},
+) => {
   const response = await fetch(
-    `${API_BASE_URL}/api/v1/toilets/nearby?${params.toString()}`,
+    `${API_BASE_URL}${path}`,
     {
-      method: "GET",
+      ...options,
       headers: {
-        Accept:
-          "application/json",
+        Accept: "application/json",
+        ...options.headers,
       },
     },
   );
 
   if (!response.ok) {
     throw new Error(
-      await parseErrorMessage(
-        response,
-      ),
+      await parseErrorMessage(response),
     );
   }
 
-  const data =
-    await response.json();
+  return response.json();
+};
 
-  return Array.isArray(data)
-    ? data
-    : [];
+/**
+ * 현재 위치 기준 주변 화장실 조회
+ *
+ * GET /api/v1/toilets/nearby
+ */
+export const getNearbyToilets = async ({
+  latitude,
+  longitude,
+  radiusMeters = 3000,
+  limit = 20,
+}) => {
+  if (
+    !Number.isFinite(Number(latitude)) ||
+    !Number.isFinite(Number(longitude))
+  ) {
+    throw new Error(
+      "현재 위치 정보가 올바르지 않습니다.",
+    );
+  }
+
+  const params = new URLSearchParams({
+    latitude: String(latitude),
+    longitude: String(longitude),
+    radius_meters: String(radiusMeters),
+    limit: String(limit),
+  });
+
+  const data = await requestJson(
+    `/api/v1/toilets/nearby?${params.toString()}`,
+    {
+      method: "GET",
+    },
+  );
+
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  if (Array.isArray(data?.items)) {
+    return data.items;
+  }
+
+  if (Array.isArray(data?.toilets)) {
+    return data.toilets;
+  }
+
+  if (Array.isArray(data?.data)) {
+    return data.data;
+  }
+
+  return [];
+};
+
+/**
+ * 화장실 상세 조회
+ *
+ * GET /api/v1/toilets/{toilet_id}
+ */
+export const getToiletDetail = async (
+  toiletId,
+) => {
+  if (
+    toiletId === null ||
+    toiletId === undefined ||
+    toiletId === ""
+  ) {
+    throw new Error(
+      "화장실 ID가 없습니다.",
+    );
+  }
+
+  return requestJson(
+    `/api/v1/toilets/${encodeURIComponent(
+      toiletId,
+    )}`,
+    {
+      method: "GET",
+    },
+  );
 };

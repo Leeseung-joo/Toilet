@@ -39,9 +39,6 @@ let currentLocationMarker = null;
 let infoWindow = null;
 let resizeHandler = null;
 
-let locationWatchId = null;
-let locationTimerId = null;
-
 const getKakao = () => window.kakao;
 
 const loadKakaoMapSdk = () => {
@@ -51,9 +48,7 @@ const loadKakaoMapSdk = () => {
 
   if (getKakao()?.maps?.load) {
     return new Promise((resolve) => {
-      getKakao().maps.load(() => {
-        resolve(getKakao());
-      });
+      getKakao().maps.load(() => resolve(getKakao()));
     });
   }
 
@@ -81,20 +76,13 @@ const loadKakaoMapSdk = () => {
           return;
         }
 
-        getKakao().maps.load(() => {
-          resolve(getKakao());
-        });
+        getKakao().maps.load(() => resolve(getKakao()));
       };
 
       const existingScript =
         document.getElementById("kakao-map-sdk");
 
       if (existingScript) {
-        if (getKakao()?.maps?.load) {
-          finishLoading();
-          return;
-        }
-
         existingScript.addEventListener(
           "load",
           finishLoading,
@@ -160,6 +148,11 @@ const isValidCoordinate = (
   );
 };
 
+/*
+ * 카카오 지도는 국내 지도 서비스이므로,
+ * 브라우저가 VPN·데스크톱 위치 오차 등으로 해외 좌표를 반환하면
+ * 해당 좌표로 이동하지 않고 기본 위치를 유지합니다.
+ */
 const isInsideKoreaMapArea = (
   latitude,
   longitude,
@@ -268,14 +261,6 @@ const createCurrentLocationImage = () => {
   );
 };
 
-const getSelectedToilet = () => {
-  return props.toilets.find(
-    (toilet) =>
-      String(toilet.id) ===
-      String(props.selectedToiletId),
-  );
-};
-
 const clearToiletMarkers = () => {
   toiletMarkers.forEach(({ marker }) => {
     marker.setMap(null);
@@ -283,6 +268,14 @@ const clearToiletMarkers = () => {
 
   toiletMarkers = [];
   infoWindow?.close();
+};
+
+const getSelectedToilet = () => {
+  return props.toilets.find(
+    (toilet) =>
+      String(toilet.id) ===
+      String(props.selectedToiletId),
+  );
 };
 
 const openSelectedInfoWindow = () => {
@@ -426,28 +419,12 @@ const showCurrentLocation = ({
       zIndex: 30,
     });
 
+  /*
+   * 현재 위치를 받은 뒤에는 이 코드만 지도 중심을 변경합니다.
+   * 화장실 props나 selectedToiletId watcher는 중심을 변경하지 않습니다.
+   */
   map.setLevel(4);
   map.setCenter(position);
-};
-
-const stopLocationWatch = () => {
-  if (
-    locationWatchId !== null &&
-    navigator.geolocation
-  ) {
-    navigator.geolocation.clearWatch(
-      locationWatchId,
-    );
-  }
-
-  if (locationTimerId !== null) {
-    window.clearTimeout(
-      locationTimerId,
-    );
-  }
-
-  locationWatchId = null;
-  locationTimerId = null;
 };
 
 const requestCurrentLocation = ({
@@ -467,179 +444,95 @@ const requestCurrentLocation = ({
     return;
   }
 
-  stopLocationWatch();
+  navigator.geolocation.getCurrentPosition(
+    ({ coords }) => {
+      const latitude =
+        Number(coords.latitude);
 
-  let completed = false;
-  let bestKoreaPosition = null;
-  let lastReceivedPosition = null;
+      const longitude =
+        Number(coords.longitude);
 
-  const finishWithSuccess = (
-    location,
-  ) => {
-    if (completed) {
-      return;
-    }
+      const accuracy =
+        Number(coords.accuracy);
 
-    completed = true;
-    stopLocationWatch();
+      console.log(
+        "[현재 위치]",
+        {
+          latitude,
+          longitude,
+          accuracy,
+        },
+      );
 
-    console.log(
-      "[최종 현재 위치]",
-      location,
-    );
+      if (
+        !isValidCoordinate(
+          latitude,
+          longitude,
+        )
+      ) {
+        emit("location-error", {
+          message:
+            "브라우저에서 올바른 위치 좌표를 받지 못했습니다.",
+          requestedByUser,
+        });
 
-    showCurrentLocation(location);
+        return;
+      }
 
-    emit(
-      "location-success",
-      location,
-    );
-  };
+      /*
+       * 해외 좌표로 이동하면 국내 카카오 지도 타일이 하얗게 보일 수 있습니다.
+       * 이 경우 지도를 이동시키지 않고 원인을 명확히 알립니다.
+       */
+      if (
+        !isInsideKoreaMapArea(
+          latitude,
+          longitude,
+        )
+      ) {
+        emit("location-error", {
+          message:
+            "브라우저가 대한민국 밖의 위치를 반환했습니다. VPN, Chrome Sensors 또는 Windows 위치 설정을 확인해주세요.",
+          requestedByUser,
+        });
 
-  const finishWithError = (
-    message,
-  ) => {
-    if (completed) {
-      return;
-    }
+        return;
+      }
 
-    completed = true;
-    stopLocationWatch();
+      showCurrentLocation({
+        latitude,
+        longitude,
+      });
 
-    console.error(
-      "[현재 위치 확인 실패]",
-      {
-        message,
-        lastReceivedPosition,
-      },
-    );
+      emit("location-success", {
+        latitude,
+        longitude,
+        accuracy,
+      });
+    },
+    (error) => {
+      const messages = {
+        1: "위치 권한이 거부되었습니다. 브라우저에서 위치 권한을 허용해주세요.",
+        2: "현재 위치 정보를 가져올 수 없습니다.",
+        3: "현재 위치 확인 시간이 초과되었습니다. Windows 위치 서비스와 Chrome 권한을 확인해주세요.",
+      };
 
-    emit("location-error", {
-      message,
-      requestedByUser,
-    });
-  };
-
-  locationWatchId =
-    navigator.geolocation.watchPosition(
-      ({ coords }) => {
-        const location = {
-          latitude: Number(
-            coords.latitude,
-          ),
-          longitude: Number(
-            coords.longitude,
-          ),
-          accuracy: Number(
-            coords.accuracy,
-          ),
-        };
-
-        console.log(
-          "[위치 후보 수신]",
-          location,
-        );
-
-        if (
-          !isValidCoordinate(
-            location.latitude,
-            location.longitude,
-          )
-        ) {
-          return;
-        }
-
-        lastReceivedPosition = location;
-
-        /*
-         * 처음 받은 해외·부정확 좌표를 바로 사용하지 않고
-         * 제한 시간 동안 다음 위치 후보를 기다립니다.
-         */
-        if (
-          !isInsideKoreaMapArea(
-            location.latitude,
-            location.longitude,
-          )
-        ) {
-          return;
-        }
-
-        if (
-          !bestKoreaPosition ||
-          !Number.isFinite(
-            bestKoreaPosition.accuracy,
-          ) ||
-          location.accuracy <
-            bestKoreaPosition.accuracy
-        ) {
-          bestKoreaPosition = location;
-        }
-
-        /*
-         * 정확도 1km 이내면 바로 사용하고,
-         * 그보다 부정확한 값은 제한 시간까지 더 기다립니다.
-         */
-        if (
-          Number.isFinite(
-            location.accuracy,
-          ) &&
-          location.accuracy <= 1000
-        ) {
-          finishWithSuccess(
-            location,
-          );
-        }
-      },
-      (error) => {
-        console.warn(
-          "[브라우저 위치 오류]",
-          {
-            code: error.code,
-            message: error.message,
-          },
-        );
-
-        if (error.code === 1) {
-          finishWithError(
-            "위치 권한이 거부되었습니다. 브라우저에서 위치 권한을 허용해주세요.",
-          );
-        }
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 15000,
-      },
-    );
-
-  locationTimerId =
-    window.setTimeout(
-      () => {
-        if (bestKoreaPosition) {
-          finishWithSuccess(
-            bestKoreaPosition,
-          );
-          return;
-        }
-
-        if (lastReceivedPosition) {
-          finishWithError(
-            "현재 기기가 대한민국 밖의 위치를 반환하고 있습니다. Chrome Sensors, VPN 또는 Windows 위치 설정을 확인해주세요.",
-          );
-          return;
-        }
-
-        finishWithError(
-          "현재 위치를 확인하지 못했습니다. 위치 서비스를 켠 뒤 다시 시도해주세요.",
-        );
-      },
-      18000,
-    );
+      emit("location-error", {
+        message:
+          messages[error.code] ??
+          "현재 위치를 불러오지 못했습니다.",
+        requestedByUser,
+      });
+    },
+    {
+      enableHighAccuracy: false,
+      timeout:
+        requestedByUser ? 60000 : 30000,
+      maximumAge: 300000,
+    },
+  );
 };
 
-const focusToilet = (
-  toiletId,
-) => {
+const focusToilet = (toiletId) => {
   if (!map || !getKakao()?.maps) {
     return;
   }
@@ -676,17 +569,6 @@ const focusToilet = (
       longitude,
     ),
   );
-};
-
-const relayoutMap = () => {
-  if (!map) {
-    return;
-  }
-
-  const center = map.getCenter();
-
-  map.relayout();
-  map.setCenter(center);
 };
 
 const initializeMap = async () => {
@@ -727,16 +609,22 @@ const initializeMap = async () => {
 
     renderToiletMarkers();
 
-    window.setTimeout(() => {
-      relayoutMap();
-    }, 150);
-
+    /*
+     * 지도 생성 직후 브라우저 현재 위치를 요청합니다.
+     * 카카오는 지도만 그리고 위치 좌표는 브라우저가 제공합니다.
+     */
     requestCurrentLocation({
       requestedByUser: false,
     });
 
     resizeHandler = () => {
-      relayoutMap();
+      if (!map) {
+        return;
+      }
+
+      const center = map.getCenter();
+      map.relayout();
+      map.setCenter(center);
     };
 
     window.addEventListener(
@@ -759,8 +647,8 @@ watch(
   () => props.toilets,
   () => {
     /*
-     * 화장실 목록이 들어와도 지도 중심은 바꾸지 않고
-     * 마커만 다시 그립니다.
+     * 백엔드 또는 Mock 화장실 목록이 들어와도
+     * 현재 위치 중심은 유지하고 마커만 다시 그립니다.
      */
     renderToiletMarkers();
   },
@@ -774,6 +662,7 @@ watch(
   () => {
     /*
      * 선택된 마커 모양과 정보창만 갱신합니다.
+     * 현재 위치 중심을 덮어쓰지 않습니다.
      */
     renderToiletMarkers();
   },
@@ -784,7 +673,6 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  stopLocationWatch();
   clearToiletMarkers();
 
   currentLocationMarker?.setMap(null);
@@ -807,7 +695,6 @@ defineExpose({
   moveToCurrentLocation:
     requestCurrentLocation,
   focusToilet,
-  relayoutMap,
 });
 </script>
 
@@ -855,8 +742,8 @@ defineExpose({
 }
 
 /*
- * 전역 img { max-width: 100%; }가
- * 카카오 지도 타일을 축소하지 않도록 합니다.
+ * global.css의 img { max-width: 100%; }가
+ * 카카오 지도 타일을 줄이지 않도록 합니다.
  */
 .kakao-map :deep(img) {
   max-width: none !important;
