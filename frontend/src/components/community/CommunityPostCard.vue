@@ -21,6 +21,7 @@ const categoryLabel = computed(() => {
     REPORT: "이용 제보",
     QUESTION: "질문",
     REVIEW: "후기",
+
     CLEAN: "청결",
     CROWDED: "혼잡",
     TISSUE: "휴지",
@@ -40,6 +41,7 @@ const categoryTone = computed(() => {
     REPORT: "soft",
     QUESTION: "primary",
     REVIEW: "success",
+
     CLEAN: "success",
     CROWDED: "warning",
     TISSUE: "soft",
@@ -55,7 +57,11 @@ const categoryTone = computed(() => {
 });
 
 const commentCount = computed(() => {
-  if (Array.isArray(props.post.comments)) {
+  if (
+    Array.isArray(
+      props.post.comments,
+    )
+  ) {
     return props.post.comments.length;
   }
 
@@ -84,7 +90,7 @@ const toggleLike = () => {
   >
     <BaseCard class="community-post-card">
       <div class="community-post-card__header">
-        <div>
+        <div class="community-post-card__author-area">
           <strong class="community-post-card__author">
             {{ post.author }}
           </strong>
@@ -160,7 +166,7 @@ const toggleLike = () => {
           </svg>
 
           <span>
-            공감 {{ post.likeCount }}
+            공감 {{ post.likeCount ?? 0 }}
           </span>
         </button>
 
@@ -195,6 +201,9 @@ const toggleLike = () => {
 <style scoped>
 .community-post-wrapper {
   display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 290px;
   border-radius: 18px;
   outline: none;
   cursor: pointer;
@@ -207,10 +216,15 @@ const toggleLike = () => {
 }
 
 .community-post-card {
+  display: flex;
+  width: 100%;
+  height: 290px;
   padding: 20px;
+  flex-direction: column;
   border: 1px solid
     var(--color-border, #dce9e6);
   background: #ffffff;
+  overflow: hidden;
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease,
@@ -229,16 +243,24 @@ const toggleLike = () => {
 
 .community-post-card__header {
   display: flex;
+  min-height: 40px;
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
 }
 
+.community-post-card__author-area {
+  min-width: 0;
+}
+
 .community-post-card__author {
   display: block;
+  overflow: hidden;
   color:
     var(--color-text, #173b38);
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .community-post-card__time {
@@ -253,15 +275,22 @@ const toggleLike = () => {
 }
 
 .community-post-card__title {
-  margin: 17px 0 8px;
+  display: -webkit-box;
+  height: 49px;
+  margin: 16px 0 8px;
+  overflow: hidden;
   color:
     var(--color-text, #173b38);
   font-size: 17px;
   line-height: 1.45;
+  word-break: keep-all;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .community-post-card__content {
   display: -webkit-box;
+  height: 66px;
   margin: 0;
   overflow: hidden;
   color:
@@ -271,14 +300,16 @@ const toggleLike = () => {
     );
   font-size: 13px;
   line-height: 1.7;
-  white-space: pre-line;
+  white-space: normal;
+  word-break: break-word;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
 
 .community-post-card__location {
   display: flex;
-  margin-top: 16px;
+  min-width: 0;
+  margin-top: 15px;
   align-items: center;
   gap: 6px;
   color:
@@ -290,12 +321,20 @@ const toggleLike = () => {
 .community-post-card__location svg {
   width: 15px;
   height: 15px;
+  flex-shrink: 0;
+}
+
+.community-post-card__location span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .community-post-card__footer {
   display: flex;
   padding-top: 15px;
-  margin-top: 17px;
+  margin-top: auto;
   align-items: center;
   gap: 16px;
   border-top: 1px solid #edf3f1;

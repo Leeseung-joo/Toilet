@@ -1,6 +1,7 @@
 <script setup>
 import {
   computed,
+  onActivated,
   onMounted,
   ref,
 } from "vue";
@@ -11,11 +12,11 @@ import BaseButton from "../components/common/BaseButton.vue";
 import BaseCard from "../components/common/BaseCard.vue";
 import BaseChip from "../components/common/BaseChip.vue";
 import CommunityPostCard from "../components/community/CommunityPostCard.vue";
+
 import {
   getCommunityPosts,
   toggleCommunityPostLike,
 } from "../stores/communityStore.js";
-const STORAGE_KEY = "toilet-community-posts";
 
 const router = useRouter();
 
@@ -25,105 +26,16 @@ const filters = [
     label: "전체",
   },
   {
-    value: "CLEAN",
-    label: "청결",
+    value: "REPORT",
+    label: "이용 제보",
   },
   {
-    value: "CROWDED",
-    label: "혼잡",
+    value: "QUESTION",
+    label: "질문",
   },
   {
-    value: "TISSUE",
-    label: "휴지",
-  },
-  {
-    value: "BROKEN",
-    label: "시설 고장",
-  },
-  {
-    value: "SAFETY",
-    label: "안전",
-  },
-];
-
-const defaultPosts = [
-  {
-    id: 1,
-    author: "익명 이용자",
-    createdAt: "10분 전",
-    category: "CLEAN",
-    title: "대전역 동광장 화장실 깨끗해요",
-    content:
-      "방금 이용했는데 바닥이 깨끗했고 휴지도 충분했습니다. 대전역 근처에서 급하신 분들은 동광장 쪽을 이용해보세요.",
-    toiletName: "대전역 동광장 공중화장실",
-    likeCount: 18,
-    commentCount: 4,
-    liked: false,
-  },
-  {
-    id: 2,
-    author: "익명 이용자",
-    createdAt: "25분 전",
-    category: "CROWDED",
-    title: "은행동 화장실 지금 사람이 많아요",
-    content:
-      "현재 줄이 조금 길어요. 급한 분들은 중앙로역 쪽 화장실을 이용하는 게 더 빠를 것 같습니다.",
-    toiletName: "은행동 으능정이 공중화장실",
-    likeCount: 11,
-    commentCount: 7,
-    liked: true,
-  },
-  {
-    id: 3,
-    author: "익명 이용자",
-    createdAt: "42분 전",
-    category: "TISSUE",
-    title: "휴지가 거의 없어요",
-    content:
-      "여자 화장실 첫 번째 칸에 휴지가 거의 없습니다. 관리하시는 분이 확인해주시면 좋겠습니다.",
-    toiletName: "서대전공원 공중화장실",
-    likeCount: 8,
-    commentCount: 2,
-    liked: false,
-  },
-  {
-    id: 4,
-    author: "익명 이용자",
-    createdAt: "1시간 전",
-    category: "BROKEN",
-    title: "세면대 하나가 고장 난 것 같아요",
-    content:
-      "왼쪽 세면대에서 물이 나오지 않습니다. 나머지 세면대는 정상적으로 이용할 수 있어요.",
-    toiletName: "한밭수목원 동원 화장실",
-    likeCount: 6,
-    commentCount: 3,
-    liked: false,
-  },
-  {
-    id: 5,
-    author: "익명 이용자",
-    createdAt: "2시간 전",
-    category: "SAFETY",
-    title: "야간에도 주변이 밝아서 이용하기 편했어요",
-    content:
-      "입구와 주변 가로등이 밝고 사람이 다니는 길과 가까워서 늦은 시간에도 비교적 안심됐습니다.",
-    toiletName: "대전시청 남문 공중화장실",
-    likeCount: 24,
-    commentCount: 5,
-    liked: true,
-  },
-  {
-    id: 6,
-    author: "익명 이용자",
-    createdAt: "3시간 전",
-    category: "CLEAN",
-    title: "청소 직후라 상태가 좋아요",
-    content:
-      "관리하시는 분이 방금 청소를 마치셔서 전체적으로 깨끗합니다. 기저귀 교환대도 정돈되어 있었어요.",
-    toiletName: "엑스포시민광장 공중화장실",
-    likeCount: 15,
-    commentCount: 1,
-    liked: false,
+    value: "REVIEW",
+    label: "후기",
   },
 ];
 
@@ -132,81 +44,35 @@ const selectedFilter = ref("ALL");
 const sortOption = ref("LATEST");
 const searchKeyword = ref("");
 
-const readStoredPosts = () => {
-  try {
-    const rawValue =
-      window.localStorage.getItem(STORAGE_KEY);
-
-    if (!rawValue) {
-      return [];
-    }
-
-    const parsed = JSON.parse(rawValue);
-
-    return Array.isArray(parsed)
-      ? parsed
-      : [];
-  } catch (error) {
-    console.error(
-      "[커뮤니티 게시글 불러오기 실패]",
-      error,
-    );
-
-    return [];
-  }
-};
-
 const loadPosts = () => {
-  const storedPosts = readStoredPosts();
-
-  const storedIds = new Set(
-    storedPosts.map((post) =>
-      String(post.id),
-    ),
-  );
-
-  posts.value = [
-    ...storedPosts,
-    ...defaultPosts.filter(
-      (post) =>
-        !storedIds.has(String(post.id)),
-    ),
-  ];
+  posts.value = getCommunityPosts();
 };
 
 const filteredPosts = computed(() => {
-  const keyword =
-    searchKeyword.value
-      .trim()
-      .toLowerCase();
+  const keyword = searchKeyword.value
+    .trim()
+    .toLowerCase();
 
   let result = posts.value.filter((post) => {
-    const category =
-      post.category ?? "CLEAN";
-
     const matchesFilter =
       selectedFilter.value === "ALL" ||
-      category === selectedFilter.value;
+      post.category === selectedFilter.value;
 
-    const title =
-      String(post.title ?? "").toLowerCase();
-
-    const content =
-      String(post.content ?? "").toLowerCase();
-
-    const toiletName =
-      String(post.toiletName ?? "").toLowerCase();
+    const searchableText = [
+      post.title,
+      post.content,
+      post.toiletName,
+    ]
+      .map((value) =>
+        String(value ?? "").toLowerCase(),
+      )
+      .join(" ");
 
     const matchesKeyword =
       !keyword ||
-      title.includes(keyword) ||
-      content.includes(keyword) ||
-      toiletName.includes(keyword);
+      searchableText.includes(keyword);
 
-    return (
-      matchesFilter &&
-      matchesKeyword
-    );
+    return matchesFilter && matchesKeyword;
   });
 
   if (sortOption.value === "POPULAR") {
@@ -225,20 +91,8 @@ const selectFilter = (filter) => {
 };
 
 const toggleLike = (postId) => {
-  const post = posts.value.find(
-    (item) =>
-      String(item.id) ===
-      String(postId),
-  );
-
-  if (!post) {
-    return;
-  }
-
-  post.liked = !post.liked;
-  post.likeCount =
-    Number(post.likeCount ?? 0) +
-    (post.liked ? 1 : -1);
+  toggleCommunityPostLike(postId);
+  loadPosts();
 };
 
 const openCreatePage = () => {
@@ -247,9 +101,9 @@ const openCreatePage = () => {
   });
 };
 
-const openEditPage = (post) => {
+const openDetailPage = (post) => {
   router.push({
-    name: "community-edit",
+    name: "community-detail",
     params: {
       postId: post.id,
     },
@@ -257,6 +111,10 @@ const openEditPage = (post) => {
 };
 
 onMounted(() => {
+  loadPosts();
+});
+
+onActivated(() => {
   loadPosts();
 });
 </script>
@@ -275,7 +133,7 @@ onMounted(() => {
           </h1>
 
           <p>
-            청결도, 혼잡도, 휴지 여부와 시설 고장 정보를
+            현재 이용 가능 여부, 질문과 후기를
             익명으로 공유할 수 있습니다.
           </p>
         </div>
@@ -315,7 +173,7 @@ onMounted(() => {
           <input
             v-model="searchKeyword"
             type="search"
-            placeholder="화장실명이나 제보 내용 검색"
+            placeholder="화장실명이나 게시글 내용 검색"
           />
         </div>
 
@@ -359,7 +217,7 @@ onMounted(() => {
           :key="post.id"
           :post="post"
           @like="toggleLike"
-          @open="openEditPage"
+          @open="openDetailPage"
         />
       </section>
 
@@ -368,11 +226,11 @@ onMounted(() => {
         class="community-empty"
       >
         <strong>
-          조건에 맞는 제보가 없습니다.
+          조건에 맞는 게시글이 없습니다.
         </strong>
 
         <p>
-          다른 필터를 선택하거나 새로운 제보를 작성해보세요.
+          다른 필터를 선택하거나 새로운 글을 작성해보세요.
         </p>
       </BaseCard>
     </main>
@@ -385,7 +243,10 @@ onMounted(() => {
 }
 
 .community-view {
-  width: min(1120px, calc(100% - 40px));
+  width: min(
+    1120px,
+    calc(100% - 40px)
+  );
   padding: 48px 0 80px;
   margin: 0 auto;
 }
@@ -411,7 +272,8 @@ onMounted(() => {
   margin: 15px 0 12px;
   color:
     var(--color-text, #173b38);
-  font-size: clamp(30px, 4vw, 46px);
+  font-size:
+    clamp(30px, 4vw, 46px);
   line-height: 1.2;
   letter-spacing: -0.04em;
 }
@@ -420,7 +282,10 @@ onMounted(() => {
   max-width: 580px;
   margin: 0;
   color:
-    var(--color-text-subtle, #657976);
+    var(
+      --color-text-subtle,
+      #657976
+    );
   font-size: 14px;
   line-height: 1.7;
 }
@@ -449,14 +314,18 @@ onMounted(() => {
   border-color:
     var(--color-primary, #0d9f8c);
   box-shadow:
-    0 0 0 3px rgba(13, 159, 140, 0.1);
+    0 0 0 3px
+    rgba(13, 159, 140, 0.1);
 }
 
 .community-search svg {
   width: 18px;
   height: 18px;
   color:
-    var(--color-text-muted, #8fa09d);
+    var(
+      --color-text-muted,
+      #8fa09d
+    );
 }
 
 .community-search input {
@@ -498,7 +367,10 @@ onMounted(() => {
   border-radius: 999px;
   background: #ffffff;
   color:
-    var(--color-text-subtle, #657976);
+    var(
+      --color-text-subtle,
+      #657976
+    );
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
@@ -516,7 +388,10 @@ onMounted(() => {
 .community-post-list {
   display: grid;
   grid-template-columns:
-    repeat(2, minmax(0, 1fr));
+    repeat(
+      2,
+      minmax(0, 1fr)
+    );
   gap: 18px;
 }
 
@@ -534,13 +409,19 @@ onMounted(() => {
 .community-empty p {
   margin: 8px 0 0;
   color:
-    var(--color-text-muted, #8fa09d);
+    var(
+      --color-text-muted,
+      #8fa09d
+    );
   font-size: 12px;
 }
 
 @media (max-width: 760px) {
   .community-view {
-    width: min(100% - 28px, 1120px);
+    width: min(
+      100% - 28px,
+      1120px
+    );
     padding-top: 28px;
   }
 
