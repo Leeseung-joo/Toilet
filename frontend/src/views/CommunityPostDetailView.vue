@@ -1,8 +1,8 @@
 <script setup>
 import {
   computed,
-  onMounted,
   ref,
+  watch,
 } from "vue";
 import {
   useRoute,
@@ -10,177 +10,194 @@ import {
 } from "vue-router";
 
 import AppShell from "../components/common/AppShell.vue";
-import BaseButton from "../components/common/BaseButton.vue";
-import BaseCard from "../components/common/BaseCard.vue";
-import BaseChip from "../components/common/BaseChip.vue";
 
 import {
   deleteCommunityPost,
-  getCommunityPostById,
-  toggleCommunityPostLike,
-  verifyCommunityPostPassword,
-} from "../stores/communityStore.js";
+  getCommunityPostDetail,
+} from "../api/communityApi.js";
 
 const route = useRoute();
 const router = useRouter();
 
 const post = ref(null);
 
-const actionMode = ref(null);
-const password = ref("");
-const passwordError = ref("");
+const loading = ref(false);
+const loadError = ref("");
 
-const categoryLabel = computed(() => {
-  const labels = {
-    REPORT: "이용 제보",
-    QUESTION: "질문",
-    REVIEW: "후기",
+const deleteModalOpen = ref(false);
+const deletePassword = ref("");
+const deleteError = ref("");
+const deleting = ref(false);
 
-    CLEAN: "청결",
-    CROWDED: "혼잡",
-    TISSUE: "휴지",
-    BROKEN: "시설 고장",
-    SAFETY: "안전",
+/*
+ * 댓글 목록 API가 연결되면 이 배열에
+ * 실제 응답 데이터를 넣으면 된다.
+ */
+const comments = ref([]);
+
+const postId = computed(() => {
+  return route.params.postId;
+});
+
+const normalizePost = (data) => {
+  return {
+    id: data.post_id,
+
+    toiletId:
+      data.toilet?.toilet_id ??
+      null,
+
+    toiletName:
+      data.toilet?.name ??
+      "화장실 정보 없음",
+
+    nickname:
+      data.nickname ??
+      "익명",
+
+    title:
+      data.title ??
+      "제목 없음",
+
+    content:
+      data.content ?? "",
+
+    commentCount:
+      data.comment_count ?? 0,
+
+    createdAt:
+      data.created_at,
+
+    updatedAt:
+      data.updated_at,
   };
-
-  return (
-    labels[post.value?.category] ??
-    "이용 제보"
-  );
-});
-
-const comments = computed(() => {
-  return Array.isArray(
-    post.value?.comments,
-  )
-    ? post.value.comments
-    : [];
-});
-
-const modalTitle = computed(() => {
-  return actionMode.value === "delete"
-    ? "게시글 삭제"
-    : "게시글 수정";
-});
-
-const modalDescription = computed(() => {
-  return actionMode.value === "delete"
-    ? "게시글을 삭제하려면 작성할 때 설정한 비밀번호를 입력해주세요."
-    : "게시글을 수정하려면 작성할 때 설정한 비밀번호를 입력해주세요.";
-});
-
-const loadPost = () => {
-  const foundPost =
-    getCommunityPostById(
-      route.params.postId,
-    );
-
-  if (!foundPost) {
-    window.alert(
-      "게시글을 찾지 못했습니다.",
-    );
-
-    router.replace({
-      name: "community",
-    });
-
-    return;
-  }
-
-  post.value = foundPost;
 };
 
-const goToList = () => {
+const formatDate = (dateString) => {
+  if (!dateString) {
+    return "";
+  }
+
+  const date = new Date(dateString);
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return dateString;
+  }
+
+  return new Intl.DateTimeFormat(
+    "ko-KR",
+    {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    },
+  ).format(date);
+};
+
+const loadPost = async () => {
+  loading.value = true;
+  loadError.value = "";
+
+  try {
+    const response =
+      await getCommunityPostDetail(
+        postId.value,
+      );
+
+    post.value =
+      normalizePost(response);
+  } catch (error) {
+    post.value = null;
+
+    loadError.value =
+      error instanceof Error
+        ? error.message
+        : "게시글을 불러오지 못했습니다.";
+  } finally {
+    loading.value = false;
+  }
+};
+
+const goBack = () => {
   router.push({
     name: "community",
   });
 };
 
-const openPasswordModal = (mode) => {
-  actionMode.value = mode;
-  password.value = "";
-  passwordError.value = "";
+const goToEdit = () => {
+  router.push({
+    name: "community-edit",
+    params: {
+      postId: postId.value,
+    },
+  });
 };
 
-const closePasswordModal = () => {
-  actionMode.value = null;
-  password.value = "";
-  passwordError.value = "";
+const openDeleteModal = () => {
+  deletePassword.value = "";
+  deleteError.value = "";
+  deleteModalOpen.value = true;
 };
 
-const confirmPassword = () => {
-  const valid =
-    verifyCommunityPostPassword(
-      route.params.postId,
-      password.value.trim(),
-    );
+const closeDeleteModal = () => {
+  if (deleting.value) {
+    return;
+  }
 
-  if (!valid) {
-    passwordError.value =
-      "비밀번호가 일치하지 않습니다.";
+  deleteModalOpen.value = false;
+  deletePassword.value = "";
+  deleteError.value = "";
+};
+
+const submitDelete = async () => {
+  if (!deletePassword.value.trim()) {
+    deleteError.value =
+      "게시글 비밀번호를 입력해주세요.";
 
     return;
   }
 
-  if (actionMode.value === "delete") {
-    const confirmed =
-      window.confirm(
-        "정말 게시글을 삭제할까요?",
-      );
+  deleting.value = true;
+  deleteError.value = "";
 
-    if (!confirmed) {
-      return;
-    }
-
-    deleteCommunityPost(
-      route.params.postId,
+  try {
+    await deleteCommunityPost(
+      postId.value,
+      deletePassword.value,
     );
 
     window.alert(
       "게시글이 삭제되었습니다.",
     );
 
-    router.push({
+    await router.replace({
       name: "community",
     });
-
-    return;
-  }
-
-  window.sessionStorage.setItem(
-    `community-edit-authorized:${route.params.postId}`,
-    "true",
-  );
-
-  router.push({
-    name: "community-edit",
-    params: {
-      postId: route.params.postId,
-    },
-  });
-};
-
-const toggleLike = () => {
-  const updatedPost =
-    toggleCommunityPostLike(
-      route.params.postId,
-    );
-
-  if (updatedPost) {
-    post.value = updatedPost;
+  } catch (error) {
+    deleteError.value =
+      error instanceof Error
+        ? error.message
+        : "게시글 삭제에 실패했습니다.";
+  } finally {
+    deleting.value = false;
   }
 };
 
-const openToiletMap = () => {
-  const toiletName =
-    post.value?.toiletName;
-
-  if (!toiletName) {
+const openMap = () => {
+  if (!post.value?.toiletName) {
     return;
   }
 
   const keyword =
-    encodeURIComponent(toiletName);
+    encodeURIComponent(
+      post.value.toiletName,
+    );
 
   window.open(
     `https://map.kakao.com/link/search/${keyword}`,
@@ -189,34 +206,89 @@ const openToiletMap = () => {
   );
 };
 
-onMounted(() => {
-  loadPost();
-});
+watch(
+  postId,
+  () => {
+    deleteModalOpen.value = false;
+    loadPost();
+  },
+  {
+    immediate: true,
+  },
+);
 </script>
 
 <template>
   <AppShell active="community">
-    <main
-      v-if="post"
-      class="detail-page"
-    >
-      <BaseCard class="detail-card">
-        <div class="detail-top">
+    <main class="detail-page">
+      <section
+        v-if="loading"
+        class="detail-card detail-status"
+      >
+        <div class="loading-spinner" />
+
+        <strong>
+          게시글을 불러오는 중입니다.
+        </strong>
+      </section>
+
+      <section
+        v-else-if="loadError"
+        class="
+          detail-card
+          detail-status
+          detail-status--error
+        "
+      >
+        <strong>
+          게시글을 불러오지 못했습니다.
+        </strong>
+
+        <p>
+          {{ loadError }}
+        </p>
+
+        <button
+          type="button"
+          class="primary-button"
+          @click="loadPost"
+        >
+          다시 시도
+        </button>
+      </section>
+
+      <section
+        v-else-if="post"
+        class="detail-card"
+      >
+        <div class="detail-top-row">
           <button
             type="button"
             class="back-button"
-            @click="goToList"
+            @click="goBack"
           >
-            ← 목록
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                d="M15 5L8 12L15 19"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+
+            목록
           </button>
 
           <div class="detail-actions">
             <button
               type="button"
               class="edit-button"
-              @click="
-                openPasswordModal('edit')
-              "
+              @click="goToEdit"
             >
               수정
             </button>
@@ -224,9 +296,7 @@ onMounted(() => {
             <button
               type="button"
               class="delete-button"
-              @click="
-                openPasswordModal('delete')
-              "
+              @click="openDeleteModal"
             >
               삭제
             </button>
@@ -234,17 +304,49 @@ onMounted(() => {
         </div>
 
         <header class="detail-header">
-          <BaseChip tone="soft">
-            {{ categoryLabel }}
-          </BaseChip>
+          <span class="category-chip">
+            이용 제보
+          </span>
 
           <h1>
             {{ post.title }}
           </h1>
 
-          <p>
-            익명 · {{ post.createdAt }}
-          </p>
+          <div class="post-meta">
+            <span>
+              {{ post.nickname }}
+            </span>
+
+            <span class="meta-divider">
+              ·
+            </span>
+
+            <time
+              :datetime="post.createdAt"
+            >
+              {{
+                formatDate(
+                  post.createdAt,
+                )
+              }}
+            </time>
+
+            <template
+              v-if="
+                post.updatedAt &&
+                post.updatedAt !==
+                  post.createdAt
+              "
+            >
+              <span class="meta-divider">
+                ·
+              </span>
+
+              <span>
+                수정됨
+              </span>
+            </template>
+          </div>
         </header>
 
         <div class="detail-divider" />
@@ -253,57 +355,37 @@ onMounted(() => {
           {{ post.content }}
         </article>
 
-        <section class="toilet-card">
-          <div class="toilet-card__information">
-            <span>
-              연관된 화장실
+        <section class="toilet-summary">
+          <div class="toilet-information">
+            <span class="toilet-label">
+              연결된 화장실
             </span>
 
             <strong>
               {{ post.toiletName }}
             </strong>
 
-            <small>
-              ★
-              {{
-                Number(
-                  post.rating ?? 0,
-                ).toFixed(1)
-              }}
-              ·
-              {{
-                post.operationStatus ??
-                "운영 정보 확인 필요"
-              }}
+            <small
+              v-if="post.toiletId"
+            >
+              화장실 ID:
+              {{ post.toiletId }}
             </small>
           </div>
 
-          <BaseButton
-            variant="secondary"
-            @click="openToiletMap"
-          >
-            지도 보기
-          </BaseButton>
-        </section>
-
-        <div class="like-area">
           <button
             type="button"
-            class="like-button"
-            :class="{
-              'like-button--active':
-                post.liked,
-            }"
-            @click="toggleLike"
+            class="map-button"
+            @click="openMap"
           >
-            ♡ 공감
-            {{ post.likeCount ?? 0 }}
+            지도 보기
           </button>
-        </div>
+        </section>
 
         <section class="comment-section">
           <h2>
-            댓글 {{ comments.length }}
+            댓글
+            {{ post.commentCount }}
           </h2>
 
           <div
@@ -313,21 +395,20 @@ onMounted(() => {
             <article
               v-for="comment in comments"
               :key="comment.id"
-              class="comment-item"
+              class="comment-card"
             >
-              <strong>
-                {{
-                  comment.author ??
-                  "익명 이용자"
-                }}
-              </strong>
-
               <p>
                 {{ comment.content }}
               </p>
 
               <small>
-                {{ comment.createdAt }}
+                {{ comment.nickname }}
+                ·
+                {{
+                  formatDate(
+                    comment.createdAt,
+                  )
+                }}
               </small>
             </article>
           </div>
@@ -336,82 +417,100 @@ onMounted(() => {
             v-else
             class="comment-empty"
           >
-            아직 등록된 댓글이 없습니다.
+            <p>
+              아직 표시할 댓글이 없습니다.
+            </p>
           </div>
         </section>
-      </BaseCard>
+      </section>
 
       <div
-        v-if="actionMode"
-        class="password-backdrop"
-        @click.self="
-          closePasswordModal
-        "
+        v-if="deleteModalOpen"
+        class="modal-backdrop"
+        @click.self="closeDeleteModal"
       >
-        <BaseCard class="password-modal">
-          <div class="password-modal__header">
+        <section
+          class="delete-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-title"
+        >
+          <div class="modal-header">
             <div>
               <span>
                 PASSWORD CHECK
               </span>
 
-              <h2>
-                {{ modalTitle }}
+              <h2 id="delete-title">
+                게시글 삭제
               </h2>
             </div>
 
             <button
               type="button"
-              class="password-modal__close"
-              @click="
-                closePasswordModal
-              "
+              class="modal-close"
+              :disabled="deleting"
+              aria-label="삭제 창 닫기"
+              @click="closeDeleteModal"
             >
               ×
             </button>
           </div>
 
-          <p>
-            {{ modalDescription }}
+          <p class="modal-description">
+            작성할 때 설정한 비밀번호를 입력해주세요.
+            삭제한 게시글은 복구할 수 없습니다.
           </p>
 
           <form
-            @submit.prevent="
-              confirmPassword
-            "
+            class="delete-form"
+            @submit.prevent="submitDelete"
           >
-            <input
-              v-model="password"
-              type="password"
-              inputmode="numeric"
-              placeholder="비밀번호 입력"
-              autocomplete="current-password"
-            />
+            <label>
+              <span>
+                비밀번호
+              </span>
+
+              <input
+                v-model="deletePassword"
+                type="password"
+                autocomplete="current-password"
+                placeholder="게시글 비밀번호"
+                :disabled="deleting"
+              />
+            </label>
 
             <small
-              v-if="passwordError"
-              class="password-error"
+              v-if="deleteError"
+              class="delete-error"
             >
-              {{ passwordError }}
+              {{ deleteError }}
             </small>
 
-            <div class="password-actions">
-              <BaseButton
+            <div class="modal-actions">
+              <button
                 type="button"
-                variant="secondary"
-                @click="
-                  closePasswordModal
-                "
+                class="modal-cancel-button"
+                :disabled="deleting"
+                @click="closeDeleteModal"
               >
                 취소
-              </BaseButton>
+              </button>
 
-              <BaseButton type="submit">
-                확인
-              </BaseButton>
+              <button
+                type="submit"
+                class="modal-delete-button"
+                :disabled="deleting"
+              >
+                {{
+                  deleting
+                    ? "삭제 중..."
+                    : "삭제하기"
+                }}
+              </button>
             </div>
           </form>
-        </BaseCard>
+        </section>
       </div>
     </main>
   </AppShell>
@@ -423,210 +522,412 @@ onMounted(() => {
 }
 
 .detail-page {
-  min-height: calc(
-    100vh - var(--header-height, 72px)
+  width: min(
+    920px,
+    calc(100% - 40px)
   );
-  padding: 38px 20px 75px;
-  background:
-    linear-gradient(
-      180deg,
-      #f1faf8 0%,
-      #edf7f5 100%
-    );
+  padding: 48px 0 100px;
+  margin: 0 auto;
 }
 
 .detail-card {
-  width: min(820px, 100%);
-  padding: 28px 34px 34px;
-  margin: 0 auto;
+  padding: 34px 38px 38px;
   border: 1px solid
-    var(--color-border, #dce9e6);
-  border-radius: 20px;
+    var(
+      --color-border,
+      #d5e7e3
+    );
+  border-radius: 24px;
   background: #ffffff;
-  box-shadow:
-    0 18px 45px
-    rgba(31, 81, 74, 0.07);
 }
 
-.detail-top {
+.detail-top-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-}
-
-.back-button,
-.edit-button,
-.delete-button {
-  height: 34px;
-  padding: 0 17px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 800;
+  gap: 20px;
 }
 
 .back-button {
+  display: inline-flex;
+  height: 38px;
+  padding: 0 16px;
+  align-items: center;
+  gap: 6px;
   border: 0;
-  background: #e8f7f3;
-  color: #0d9f8c;
+  border-radius: 999px;
+  background: #e3f8f3;
+  color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.back-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .detail-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
+}
+
+.edit-button,
+.delete-button {
+  min-width: 76px;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .edit-button {
-  border: 1px solid #dce9e6;
+  border: 1px solid
+    var(
+      --color-border,
+      #cfe3df
+    );
   background: #ffffff;
-  color: #173b38;
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
 }
 
 .delete-button {
-  border: 1px solid #ffdddd;
-  background: #fff5f5;
-  color: #d95353;
+  border: 1px solid #ffe1e1;
+  background: #fff0f0;
+  color: #e45454;
+}
+
+.edit-button:hover {
+  border-color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+}
+
+.delete-button:hover {
+  border-color: #e45454;
 }
 
 .detail-header {
-  margin-top: 25px;
+  margin-top: 28px;
 }
 
-.detail-header h1 {
-  margin: 13px 0 8px;
-  color: #173b38;
-  font-size: clamp(
-    24px,
-    4vw,
-    34px
-  );
-  line-height: 1.35;
-  letter-spacing: -0.04em;
-}
-
-.detail-header p {
-  margin: 0;
-  color: #91a09d;
-  font-size: 10px;
-}
-
-.detail-divider {
-  height: 1px;
-  margin: 26px 0;
-  background: #dce9e6;
-}
-
-.detail-content {
-  min-height: 125px;
-  color: #294b47;
-  font-size: 14px;
-  line-height: 1.85;
-  white-space: pre-line;
-}
-
-.toilet-card {
-  display: flex;
-  padding: 20px;
-  margin-top: 30px;
+.category-chip {
+  display: inline-flex;
+  height: 30px;
+  padding: 0 13px;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  border-radius: 16px;
-  background: #e5f8f4;
-}
-
-.toilet-card__information {
-  display: grid;
-  gap: 5px;
-}
-
-.toilet-card__information span {
-  color: #0d9f8c;
-  font-size: 9px;
-  font-weight: 900;
-}
-
-.toilet-card__information strong {
-  color: #173b38;
-  font-size: 13px;
-}
-
-.toilet-card__information small {
-  color: #0d9f8c;
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.like-area {
-  display: flex;
-  margin-top: 17px;
-  justify-content: flex-end;
-}
-
-.like-button {
-  height: 34px;
-  padding: 0 15px;
-  border: 1px solid #dce9e6;
   border-radius: 999px;
-  background: #ffffff;
-  color: #839390;
-  cursor: pointer;
+  background: #e3f8f3;
+  color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
   font-size: 11px;
   font-weight: 800;
 }
 
-.like-button--active {
-  border-color: #0d9f8c;
-  color: #0d9f8c;
+.detail-header h1 {
+  margin: 17px 0 10px;
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
+  font-size:
+    clamp(
+      26px,
+      4vw,
+      38px
+    );
+  line-height: 1.3;
+  letter-spacing: -0.045em;
+  overflow-wrap: anywhere;
 }
 
-.comment-section {
-  margin-top: 29px;
+.post-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color:
+    var(
+      --color-text-muted,
+      #8c9b98
+    );
+  font-size: 11px;
 }
 
-.comment-section h2 {
-  margin: 0 0 14px;
-  color: #173b38;
-  font-size: 13px;
+.meta-divider {
+  color: #b5c0be;
 }
 
-.comment-list {
-  display: grid;
-  gap: 9px;
+.detail-divider {
+  height: 1px;
+  margin: 28px 0 0;
+  background:
+    var(
+      --color-border,
+      #dce9e6
+    );
 }
 
-.comment-item,
-.comment-empty {
-  padding: 15px 16px;
-  border-radius: 12px;
-  background: #fafdfc;
+.detail-content {
+  min-height: 170px;
+  padding: 32px 0 38px;
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
+  font-size: 14px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.comment-item strong {
-  color: #173b38;
+.toilet-summary {
+  display: flex;
+  padding: 20px 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  border-radius: 18px;
+  background:
+    linear-gradient(
+      135deg,
+      #e9faf6 0%,
+      #dcf6f0 100%
+    );
+}
+
+.toilet-information {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.toilet-label {
+  color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.toilet-information strong {
+  overflow: hidden;
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toilet-information small {
+  color:
+    var(
+      --color-text-muted,
+      #7f918e
+    );
   font-size: 10px;
 }
 
-.comment-item p {
-  margin: 7px 0;
-  color: #607470;
+.map-button {
+  min-width: 100px;
+  height: 42px;
+  padding: 0 19px;
+  flex-shrink: 0;
+  border: 1px solid #d7ece7;
+  border-radius: 999px;
+  background: #ffffff;
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.map-button:hover {
+  border-color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+}
+
+.comment-section {
+  margin-top: 34px;
+}
+
+.comment-section h2 {
+  margin: 0 0 16px;
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
+  font-size: 15px;
+}
+
+.comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.comment-card,
+.comment-empty {
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: #f8fcfb;
+}
+
+.comment-card p,
+.comment-empty p {
+  margin: 0;
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
   font-size: 12px;
   line-height: 1.6;
 }
 
-.comment-item small {
-  color: #99a6a4;
-  font-size: 8px;
+.comment-card small {
+  display: block;
+  margin-top: 6px;
+  color:
+    var(
+      --color-text-muted,
+      #8fa09d
+    );
+  font-size: 10px;
 }
 
 .comment-empty {
-  color: #8fa09d;
-  font-size: 11px;
+  color:
+    var(
+      --color-text-muted,
+      #8fa09d
+    );
+}
+
+.comment-empty p {
+  color:
+    var(
+      --color-text-muted,
+      #8fa09d
+    );
+}
+
+.detail-status {
+  display: flex;
+  min-height: 420px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
   text-align: center;
 }
 
-.password-backdrop {
+.detail-status strong {
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
+  font-size: 15px;
+}
+
+.detail-status p {
+  margin: 0;
+  color:
+    var(
+      --color-text-muted,
+      #8fa09d
+    );
+  font-size: 12px;
+}
+
+.detail-status--error {
+  border-color:
+    rgba(
+      220,
+      90,
+      90,
+      0.3
+    );
+}
+
+.primary-button {
+  height: 40px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  color: #ffffff;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 800;
+}
+
+.loading-spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid #dce9e6;
+  border-top-color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  border-radius: 50%;
+  animation:
+    detail-spin
+    0.8s linear infinite;
+}
+
+.modal-backdrop {
   position: fixed;
   z-index: 1000;
   inset: 0;
@@ -635,97 +936,236 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   background:
-    rgba(16, 42, 39, 0.5);
+    rgba(
+      13,
+      43,
+      40,
+      0.48
+    );
 }
 
-.password-modal {
-  width: min(420px, 100%);
-  padding: 25px;
-  border: 0;
+.delete-modal {
+  width: min(
+    100%,
+    460px
+  );
+  padding: 28px;
+  border: 1px solid #dce9e6;
+  border-radius: 22px;
+  background: #ffffff;
+  box-shadow:
+    0 24px 60px
+    rgba(
+      14,
+      50,
+      46,
+      0.2
+    );
 }
 
-.password-modal__header {
+.modal-header {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 15px;
+  gap: 20px;
 }
 
-.password-modal__header span {
-  color: #0d9f8c;
-  font-size: 9px;
-  font-weight: 900;
+.modal-header span {
+  color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  font-size: 10px;
+  font-weight: 800;
 }
 
-.password-modal__header h2 {
-  margin: 6px 0 0;
-  color: #173b38;
-  font-size: 22px;
+.modal-header h2 {
+  margin: 9px 0 0;
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
+  font-size: 23px;
 }
 
-.password-modal__close {
-  width: 34px;
-  height: 34px;
+.modal-close {
+  padding: 0;
   border: 0;
-  border-radius: 50%;
-  background: #eef5f3;
-  color: #173b38;
+  background: transparent;
+  color: #849693;
   cursor: pointer;
-  font-size: 22px;
+  font-size: 28px;
+  line-height: 1;
 }
 
-.password-modal > p {
-  margin: 16px 0;
-  color: #687b78;
+.modal-description {
+  margin: 20px 0;
+  color:
+    var(
+      --color-text-subtle,
+      #657976
+    );
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.7;
 }
 
-.password-modal form {
-  display: grid;
+.delete-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.delete-form label {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.password-modal input {
+.delete-form label span {
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.delete-form input {
   width: 100%;
-  height: 46px;
-  padding: 0 14px;
-  border: 1px solid #dce9e6;
+  height: 48px;
+  padding: 0 15px;
+  border: 1px solid #cfe3df;
   border-radius: 12px;
   outline: none;
-  font-size: 13px;
+  font-family: inherit;
 }
 
-.password-modal input:focus {
-  border-color: #0d9f8c;
+.delete-form input:focus {
+  border-color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
   box-shadow:
     0 0 0 3px
-    rgba(13, 159, 140, 0.1);
+    rgba(
+      13,
+      159,
+      140,
+      0.1
+    );
 }
 
-.password-error {
-  color: #c84f4f;
-  font-size: 10px;
+.delete-error {
+  color: #c54848;
+  font-size: 11px;
 }
 
-.password-actions {
+.modal-actions {
   display: flex;
-  margin-top: 12px;
+  margin-top: 6px;
   justify-content: flex-end;
-  gap: 9px;
+  gap: 10px;
 }
 
-@media (max-width: 640px) {
+.modal-cancel-button,
+.modal-delete-button {
+  min-width: 94px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.modal-cancel-button {
+  border: 1px solid #cfe3df;
+  background: #ffffff;
+  color: #173b38;
+}
+
+.modal-delete-button {
+  border: 1px solid #e45454;
+  background: #e45454;
+  color: #ffffff;
+}
+
+.modal-cancel-button:disabled,
+.modal-delete-button:disabled,
+.modal-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@keyframes detail-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 700px) {
   .detail-page {
-    padding: 20px 14px 50px;
+    width: min(
+      100% - 24px,
+      920px
+    );
+    padding: 28px 0 80px;
   }
 
   .detail-card {
-    padding: 22px 18px 25px;
+    padding: 24px 20px 28px;
+    border-radius: 20px;
   }
 
-  .toilet-card {
+  .detail-top-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .detail-actions {
+    width: 100%;
+  }
+
+  .edit-button,
+  .delete-button {
+    flex: 1;
+  }
+
+  .detail-content {
+    min-height: 130px;
+  }
+
+  .toilet-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toilet-information strong {
+    white-space: normal;
+  }
+
+  .map-button {
+    width: 100%;
+  }
+
+  .modal-actions {
+    display: grid;
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
+  }
+
+  .modal-cancel-button,
+  .modal-delete-button {
+    width: 100%;
+    min-width: 0;
   }
 }
 </style>

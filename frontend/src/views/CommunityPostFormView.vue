@@ -10,244 +10,295 @@ import {
 } from "vue-router";
 
 import AppShell from "../components/common/AppShell.vue";
-import BaseButton from "../components/common/BaseButton.vue";
 import BaseCard from "../components/common/BaseCard.vue";
+
 import {
-  CATEGORY_OPTIONS,
   createCommunityPost,
-  getCommunityPostById,
+  getCommunityPostDetail,
   updateCommunityPost,
-} from "../stores/communityStore.js";
-const STORAGE_KEY = "toilet-community-posts";
+} from "../api/communityApi.js";
+
+import {
+  getNearbyToilets,
+} from "../api/toiletApi.js";
 
 const route = useRoute();
 const router = useRouter();
 
-const categories = [
-  {
-    value: "REPORT",
-    label: "이용 제보",
-  },
-  {
-    value: "QUESTION",
-    label: "질문",
-  },
-  {
-    value: "REVIEW",
-    label: "후기",
-  },
-];
+const isEditMode = computed(
+  () => route.name === "community-edit",
+);
 
-const isEditMode = computed(() => {
-  return route.name === "community-edit";
-});
+const loading = ref(false);
+const isSubmitting = ref(false);
+const submitError = ref("");
+const errors = ref({});
 
-const pageEyebrow = computed(() => {
-  return isEditMode.value
-    ? "ANONYMOUS POST EDIT"
-    : "ANONYMOUS POST";
-});
-
-const pageTitle = computed(() => {
-  return isEditMode.value
-    ? "작성한 정보를 수정해주세요"
-    : "새로운 정보를 나눠주세요";
-});
-
-const pageDescription = computed(() => {
-  return isEditMode.value
-    ? "작성한 제보 내용을 확인하고 필요한 부분을 수정해주세요."
-    : "주변 화장실의 이용을 더 편리하게 만드는 실시간 정보를 익명으로 나눠주세요.";
-});
-
-const submitLabel = computed(() => {
-  return isEditMode.value
-    ? "수정하기"
-    : "등록하기";
-});
+const nearbyLoading = ref(false);
+const nearbyError = ref("");
+const nearbyToilets = ref([]);
+const selectedToiletId = ref(null);
 
 const form = ref({
-  category: "REPORT",
-  toiletName: "",
+  nickname: "",
   title: "",
   content: "",
   password: "",
 });
 
-const errors = ref({
-  toiletName: "",
-  title: "",
-  content: "",
-  password: "",
-});
+const pageTitle = computed(() =>
+  isEditMode.value
+    ? "작성한 정보를 수정해주세요"
+    : "새로운 정보를 나눠주세요",
+);
 
-const isSubmitting = ref(false);
+const pageDescription = computed(() =>
+  isEditMode.value
+    ? "게시글 비밀번호를 입력하고 내용을 수정해주세요."
+    : "내 주변 화장실을 선택하고 실시간 정보를 익명으로 나눠주세요.",
+);
 
-const getStoredPosts = () => {
-  try {
-    const rawValue =
-      window.localStorage.getItem(
-        STORAGE_KEY,
+const selectedToilet = computed(() =>
+  nearbyToilets.value.find(
+    (toilet) =>
+      Number(toilet.toilet_id) ===
+      Number(selectedToiletId.value),
+  ),
+);
+
+const formatDistance = (distanceMeters) => {
+  const distance = Number(distanceMeters);
+
+  if (!Number.isFinite(distance)) {
+    return "";
+  }
+
+  if (distance < 1000) {
+    return `${Math.round(distance)}m`;
+  }
+
+  return `${(distance / 1000).toFixed(1)}km`;
+};
+
+const getToiletAddress = (toilet) => {
+  return (
+    toilet.road_address ||
+    toilet.lot_address ||
+    "주소 정보 없음"
+  );
+};
+
+const getCurrentPosition = () => {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(
+        new Error(
+          "현재 위치 기능을 지원하지 않는 브라우저입니다.",
+        ),
       );
 
-    if (!rawValue) {
-      return [];
+      return;
     }
 
-    const parsed = JSON.parse(rawValue);
-
-    return Array.isArray(parsed)
-      ? parsed
-      : [];
-  } catch (error) {
-    console.error(
-      "[커뮤니티 저장 데이터 파싱 실패]",
-      error,
+    navigator.geolocation.getCurrentPosition(
+      resolve,
+      reject,
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000,
+      },
     );
+  });
+};
 
-    return [];
+const getLocationErrorMessage = (error) => {
+  if (error?.code === 1) {
+    return "현재 위치 권한이 필요합니다. 브라우저에서 위치 권한을 허용해주세요.";
+  }
+
+  if (error?.code === 2) {
+    return "현재 위치를 확인할 수 없습니다.";
+  }
+
+  if (error?.code === 3) {
+    return "현재 위치 확인 시간이 초과되었습니다.";
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "현재 위치를 가져오지 못했습니다.";
+};
+
+const loadNearbyToilets = async () => {
+  nearbyLoading.value = true;
+  nearbyError.value = "";
+  nearbyToilets.value = [];
+  selectedToiletId.value = null;
+
+  try {
+    const position =
+      await getCurrentPosition();
+
+    const toilets =
+      await getNearbyToilets({
+        latitude:
+          position.coords.latitude,
+        longitude:
+          position.coords.longitude,
+        radiusMeters: 3000,
+        limit: 6,
+      });
+
+    nearbyToilets.value = toilets;
+
+    if (toilets.length > 0) {
+      selectedToiletId.value =
+        toilets[0].toilet_id;
+    } else {
+      nearbyError.value =
+        "반경 3km 내에 조회된 화장실이 없습니다.";
+    }
+  } catch (error) {
+    nearbyError.value =
+      getLocationErrorMessage(error);
+  } finally {
+    nearbyLoading.value = false;
   }
 };
 
-const saveStoredPosts = (posts) => {
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify(posts),
-  );
-};
-
-const getMockEditPost = (
-  postId,
-) => {
-  const mockPosts = [
-    {
-      id: 1,
-      category: "REPORT",
-      toiletName:
-        "대전역 동광장 공중화장실",
-      title:
-        "대전역 동광장 화장실 깨끗해요",
-      content:
-        "방금 이용했는데 바닥이 깨끗했고 휴지도 충분했습니다.",
-      password: "1234",
-    },
-    {
-      id: 2,
-      category: "QUESTION",
-      toiletName:
-        "은행동 으능정이 공중화장실",
-      title:
-        "현재 사람이 많이 붐비나요?",
-      content:
-        "30분 안에 방문하려고 하는데 현재 혼잡도가 궁금합니다.",
-      password: "1234",
-    },
-  ];
-
-  return mockPosts.find(
-    (post) =>
-      String(post.id) ===
-      String(postId),
-  );
-};
-
-const loadEditPost = () => {
-  if (!isEditMode.value) {
+const selectToilet = (toiletId) => {
+  if (isEditMode.value) {
     return;
   }
 
-  const postId = route.params.postId;
+  selectedToiletId.value =
+    toiletId;
 
-  const storedPost =
-    getStoredPosts().find(
-      (post) =>
-        String(post.id) ===
-        String(postId),
-    );
+  if (errors.value.toilet) {
+    errors.value = {
+      ...errors.value,
+      toilet: "",
+    };
+  }
+};
 
-  const post =
-    storedPost ??
-    getMockEditPost(postId);
+const loadEditPost = async () => {
+  if (!isEditMode.value) {
+    await loadNearbyToilets();
+    return;
+  }
 
-  if (!post) {
+  loading.value = true;
+  submitError.value = "";
+
+  try {
+    const post =
+      await getCommunityPostDetail(
+        route.params.postId,
+      );
+
+    form.value = {
+      nickname:
+        post.nickname ?? "",
+      title:
+        post.title ?? "",
+      content:
+        post.content ?? "",
+      password: "",
+    };
+
+    if (post.toilet) {
+      nearbyToilets.value = [
+        {
+          toilet_id:
+            post.toilet.toilet_id,
+          name:
+            post.toilet.name ??
+            "화장실 정보 없음",
+          road_address:
+            post.toilet.road_address ??
+            "",
+          lot_address:
+            post.toilet.lot_address ??
+            "",
+          distance_meters: null,
+        },
+      ];
+
+      selectedToiletId.value =
+        post.toilet.toilet_id;
+    }
+  } catch (error) {
     window.alert(
-      "수정할 게시글을 찾지 못했습니다.",
+      error instanceof Error
+        ? error.message
+        : "게시글을 불러오지 못했습니다.",
     );
 
-    router.replace({
+    await router.replace({
       name: "community",
+    });
+  } finally {
+    loading.value = false;
+  }
+};
+
+const validateForm = () => {
+  const nextErrors = {};
+
+  if (
+    !isEditMode.value &&
+    !selectedToilet.value
+  ) {
+    nextErrors.toilet =
+      "게시글을 작성할 화장실을 선택해주세요.";
+  }
+
+  if (
+    !isEditMode.value &&
+    !form.value.nickname.trim()
+  ) {
+    nextErrors.nickname =
+      "닉네임을 입력해주세요.";
+  }
+
+  if (!form.value.title.trim()) {
+    nextErrors.title =
+      "제목을 입력해주세요.";
+  }
+
+  if (!form.value.content.trim()) {
+    nextErrors.content =
+      "내용을 입력해주세요.";
+  }
+
+  if (!form.value.password.trim()) {
+    nextErrors.password =
+      "비밀번호를 입력해주세요.";
+  }
+
+  errors.value = nextErrors;
+
+  return (
+    Object.keys(nextErrors).length === 0
+  );
+};
+
+const cancel = () => {
+  if (isEditMode.value) {
+    router.push({
+      name: "community-detail",
+      params: {
+        postId: route.params.postId,
+      },
     });
 
     return;
   }
 
-  form.value = {
-    category:
-      post.category ?? "REPORT",
-    toiletName:
-      post.toiletName ?? "",
-    title:
-      post.title ?? "",
-    content:
-      post.content ?? "",
-    password: "",
-  };
-};
-
-const clearErrors = () => {
-  errors.value = {
-    toiletName: "",
-    title: "",
-    content: "",
-    password: "",
-  };
-};
-
-const validateForm = () => {
-  clearErrors();
-
-  const toiletName =
-    form.value.toiletName.trim();
-
-  const title =
-    form.value.title.trim();
-
-  const content =
-    form.value.content.trim();
-
-  const password =
-    form.value.password.trim();
-
-  let valid = true;
-
-  if (!toiletName) {
-    errors.value.toiletName =
-      "연관 화장실을 입력해주세요.";
-    valid = false;
-  }
-
-  if (!title) {
-    errors.value.title =
-      "제목을 입력해주세요.";
-    valid = false;
-  }
-
-  if (!content) {
-    errors.value.content =
-      "내용을 입력해주세요.";
-    valid = false;
-  }
-
-  if (!/^\d{4,}$/.test(password)) {
-    errors.value.password =
-      "숫자 4자리 이상 입력해주세요.";
-    valid = false;
-  }
-
-  return valid;
-};
-
-const cancel = () => {
   router.push({
     name: "community",
   });
@@ -259,100 +310,103 @@ const submitPost = async () => {
   }
 
   isSubmitting.value = true;
+  submitError.value = "";
 
   try {
-    const posts = getStoredPosts();
-
-    const payload = {
-      category:
-        form.value.category,
-      toiletName:
-        form.value.toiletName.trim(),
-      title:
-        form.value.title.trim(),
-      content:
-        form.value.content.trim(),
-      password:
-        form.value.password.trim(),
-    };
-
     if (isEditMode.value) {
-      const postId =
-        String(route.params.postId);
-
-      const targetIndex =
-        posts.findIndex(
-          (post) =>
-            String(post.id) ===
-            postId,
+      const updated =
+        await updateCommunityPost(
+          route.params.postId,
+          {
+            password:
+              form.value.password,
+            title:
+              form.value.title,
+            content:
+              form.value.content,
+          },
         );
-
-      if (targetIndex >= 0) {
-        posts[targetIndex] = {
-          ...posts[targetIndex],
-          ...payload,
-          updatedAt:
-            new Date().toISOString(),
-        };
-      } else {
-        posts.unshift({
-          id:
-            Number(route.params.postId) ||
-            Date.now(),
-          author: "익명 이용자",
-          createdAt: "수정됨",
-          likeCount: 0,
-          commentCount: 0,
-          liked: false,
-          ...payload,
-          updatedAt:
-            new Date().toISOString(),
-        });
-      }
-
-      saveStoredPosts(posts);
 
       window.alert(
         "게시글이 수정되었습니다.",
       );
-    } else {
-      posts.unshift({
-        id: Date.now(),
-        author: "익명 이용자",
-        createdAt: "방금 전",
-        likeCount: 0,
-        commentCount: 0,
-        liked: false,
-        ...payload,
+
+      await router.push({
+        name: "community-detail",
+        params: {
+          postId:
+            updated?.post_id ??
+            route.params.postId,
+        },
       });
 
-      saveStoredPosts(posts);
-
-      window.alert(
-        "게시글이 등록되었습니다.",
-      );
+      return;
     }
 
-    router.push({
-      name: "community",
+    const created =
+      await createCommunityPost({
+        toiletId:
+          selectedToilet.value.toilet_id,
+        nickname:
+          form.value.nickname,
+        password:
+          form.value.password,
+        title:
+          form.value.title,
+        content:
+          form.value.content,
+      });
+
+    window.alert(
+      "게시글이 등록되었습니다.",
+    );
+
+    await router.push({
+      name: "community-detail",
+      params: {
+        postId: created.post_id,
+      },
     });
+  } catch (error) {
+    submitError.value =
+      error instanceof Error
+        ? error.message
+        : isEditMode.value
+          ? "게시글 수정에 실패했습니다."
+          : "게시글 등록에 실패했습니다.";
   } finally {
     isSubmitting.value = false;
   }
 };
 
-onMounted(() => {
-  loadEditPost();
-});
+onMounted(loadEditPost);
 </script>
 
 <template>
   <AppShell active="community">
-    <main class="post-form-page">
-      <BaseCard class="post-form-card">
-        <header class="post-form-header">
-          <span class="post-form-eyebrow">
-            {{ pageEyebrow }}
+    <main class="form-page">
+      <BaseCard
+        v-if="loading"
+        class="form-card form-loading"
+      >
+        <div class="loading-spinner" />
+
+        <strong>
+          게시글을 불러오는 중입니다.
+        </strong>
+      </BaseCard>
+
+      <BaseCard
+        v-else
+        class="form-card"
+      >
+        <header class="form-header">
+          <span class="form-eyebrow">
+            {{
+              isEditMode
+                ? "ANONYMOUS POST EDIT"
+                : "ANONYMOUS POST"
+            }}
           </span>
 
           <h1>
@@ -368,154 +422,264 @@ onMounted(() => {
           class="post-form"
           @submit.prevent="submitPost"
         >
-          <fieldset class="form-fieldset">
-            <legend>카테고리</legend>
+          <fieldset class="toilet-section">
+            <legend>
+              {{
+                isEditMode
+                  ? "연결된 화장실"
+                  : "내 주변 화장실"
+              }}
+            </legend>
 
-            <div class="category-list">
+            <div
+              v-if="nearbyLoading"
+              class="nearby-status"
+            >
+              <div class="small-spinner" />
+
+              <span>
+                현재 위치를 기준으로 주변 화장실을 찾고 있습니다.
+              </span>
+            </div>
+
+            <div
+              v-else-if="nearbyError"
+              class="nearby-error"
+            >
+              <p>
+                {{ nearbyError }}
+              </p>
+
               <button
-                v-for="category in categories"
-                :key="category.value"
+                v-if="!isEditMode"
                 type="button"
-                class="category-button"
-                :class="{
-                  'category-button--active':
-                    form.category ===
-                    category.value,
-                }"
-                @click="
-                  form.category =
-                    category.value
-                "
+                class="retry-button"
+                @click="loadNearbyToilets"
               >
-                {{ category.label }}
+                위치 다시 확인
               </button>
             </div>
+
+            <div
+              v-else-if="nearbyToilets.length > 0"
+              class="toilet-toggle-list"
+            >
+              <button
+                v-for="toilet in nearbyToilets"
+                :key="toilet.toilet_id"
+                type="button"
+                class="toilet-toggle"
+                :class="{
+                  'toilet-toggle--selected':
+                    Number(selectedToiletId) ===
+                    Number(toilet.toilet_id),
+                }"
+                :aria-pressed="
+                  Number(selectedToiletId) ===
+                  Number(toilet.toilet_id)
+                "
+                :disabled="isEditMode"
+                @click="
+                  selectToilet(
+                    toilet.toilet_id,
+                  )
+                "
+              >
+                <span class="toilet-toggle__top">
+                  <strong>
+                    {{ toilet.name }}
+                  </strong>
+
+                  <em
+                    v-if="
+                      toilet.distance_meters != null
+                    "
+                  >
+                    {{
+                      formatDistance(
+                        toilet.distance_meters,
+                      )
+                    }}
+                  </em>
+                </span>
+
+                <small>
+                  {{
+                    getToiletAddress(
+                      toilet,
+                    )
+                  }}
+                </small>
+              </button>
+            </div>
+
+            <small
+              v-if="errors.toilet"
+              class="field-error"
+            >
+              {{ errors.toilet }}
+            </small>
           </fieldset>
 
-          <label class="form-field">
-            <span class="form-label">
-              연관 화장실
+          <label
+            v-if="!isEditMode"
+            class="form-field"
+          >
+            <span class="field-label">
+              닉네임
             </span>
 
             <input
-              v-model="form.toiletName"
+              v-model="form.nickname"
               type="text"
-              placeholder="대전역 동광장 공중화장실"
-              :aria-invalid="
-                Boolean(errors.toiletName)
-              "
+              maxlength="30"
+              placeholder="익명 닉네임을 입력해주세요"
+              :class="{
+                'field-control--error':
+                  errors.nickname,
+              }"
             />
 
             <small
-              v-if="errors.toiletName"
-              class="form-error"
+              v-if="errors.nickname"
+              class="field-error"
             >
-              {{ errors.toiletName }}
+              {{ errors.nickname }}
             </small>
           </label>
 
+          <div
+            v-else
+            class="author-info"
+          >
+            <span>작성자</span>
+
+            <strong>
+              {{ form.nickname || "익명" }}
+            </strong>
+          </div>
+
           <label class="form-field">
-            <span class="form-label">
+            <span class="field-label">
               제목
             </span>
 
             <input
               v-model="form.title"
               type="text"
-              maxlength="60"
-              placeholder="제목을 입력하세요"
-              :aria-invalid="
-                Boolean(errors.title)
-              "
+              maxlength="100"
+              placeholder="제목을 입력해주세요"
+              :class="{
+                'field-control--error':
+                  errors.title,
+              }"
             />
-
-            <small class="form-count">
-              {{ form.title.length }} / 60
-            </small>
 
             <small
               v-if="errors.title"
-              class="form-error"
+              class="field-error"
             >
               {{ errors.title }}
             </small>
           </label>
 
           <label class="form-field">
-            <span class="form-label">
+            <span class="field-label">
               내용
             </span>
 
             <textarea
               v-model="form.content"
-              rows="8"
-              maxlength="500"
+              rows="6"
               placeholder="현재 이용 가능 여부, 청결 상태, 휴지 유무 등 도움이 될 정보를 적어주세요."
-              :aria-invalid="
-                Boolean(errors.content)
-              "
+              :class="{
+                'field-control--error':
+                  errors.content,
+              }"
             />
-
-            <small class="form-count">
-              {{ form.content.length }} / 500
-            </small>
 
             <small
               v-if="errors.content"
-              class="form-error"
+              class="field-error"
             >
               {{ errors.content }}
             </small>
           </label>
 
           <label class="form-field">
-            <span class="form-label">
-              수정용 비밀번호
+            <span class="field-label">
+              {{
+                isEditMode
+                  ? "게시글 비밀번호"
+                  : "수정·삭제용 비밀번호"
+              }}
             </span>
 
             <input
               v-model="form.password"
               type="password"
-              inputmode="numeric"
-              autocomplete="new-password"
-              placeholder="숫자 4자리 이상 입력"
-              :aria-invalid="
-                Boolean(errors.password)
+              :autocomplete="
+                isEditMode
+                  ? 'current-password'
+                  : 'new-password'
               "
+              placeholder="비밀번호를 입력해주세요"
+              :class="{
+                'field-control--error':
+                  errors.password,
+              }"
             />
-
-            <small class="form-help">
-              게시글을 수정하거나 삭제할 때
-              사용합니다.
-            </small>
 
             <small
               v-if="errors.password"
-              class="form-error"
+              class="field-error"
             >
               {{ errors.password }}
             </small>
+
+            <small
+              v-else-if="!isEditMode"
+              class="field-help"
+            >
+              게시글 수정과 삭제 시 사용됩니다.
+            </small>
           </label>
 
-          <div class="post-form-actions">
-            <BaseButton
+          <p
+            v-if="submitError"
+            class="submit-error"
+          >
+            {{ submitError }}
+          </p>
+
+          <div class="form-actions">
+            <button
               type="button"
-              variant="secondary"
+              class="cancel-button"
+              :disabled="isSubmitting"
               @click="cancel"
             >
               취소
-            </BaseButton>
+            </button>
 
-            <BaseButton
+            <button
               type="submit"
-              :disabled="isSubmitting"
+              class="submit-button"
+              :disabled="
+                isSubmitting ||
+                nearbyLoading
+              "
             >
               {{
                 isSubmitting
-                  ? "처리 중..."
-                  : submitLabel
+                  ? isEditMode
+                    ? "수정 중..."
+                    : "등록 중..."
+                  : isEditMode
+                    ? "수정하기"
+                    : "등록하기"
               }}
-            </BaseButton>
+            </button>
           </div>
         </form>
       </BaseCard>
@@ -528,201 +692,408 @@ onMounted(() => {
   box-sizing: border-box;
 }
 
-.post-form-page {
-  min-height: calc(
-    100vh - var(--header-height, 72px)
+.form-page {
+  width: min(
+    780px,
+    calc(100% - 32px)
   );
-  padding: 34px 20px 70px;
-  background:
-    linear-gradient(
-      180deg,
-      #f1faf8 0%,
-      #edf7f5 100%
-    );
-}
-
-.post-form-card {
-  width: min(720px, 100%);
-  padding: 34px 40px 30px;
+  padding: 42px 0 90px;
   margin: 0 auto;
+}
+
+.form-card {
+  padding: 34px 40px 28px;
   border: 1px solid
-    var(--color-border, #dce9e6);
-  border-radius: 22px;
+    var(
+      --color-border,
+      #d5e7e3
+    );
+  border-radius: 20px;
   background: #ffffff;
-  box-shadow:
-    0 18px 40px rgba(31, 81, 74, 0.07);
 }
 
-.post-form-eyebrow {
+.form-header {
+  margin-bottom: 28px;
+}
+
+.form-eyebrow {
+  display: block;
+  margin-bottom: 10px;
   color:
-    var(--color-primary, #0d9f8c);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  font-size: 11px;
+  font-weight: 800;
 }
 
-.post-form-header h1 {
-  margin: 8px 0 7px;
+.form-header h1 {
+  margin: 0 0 8px;
   color:
-    var(--color-text, #173b38);
-  font-size: 27px;
-  letter-spacing: -0.04em;
+    var(
+      --color-text,
+      #063d38
+    );
+  font-size: 30px;
+  line-height: 1.25;
+  letter-spacing: -0.05em;
 }
 
-.post-form-header p {
+.form-header p {
   margin: 0;
   color:
-    var(--color-text-subtle, #718380);
+    var(
+      --color-text-muted,
+      #859491
+    );
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.6;
 }
 
 .post-form {
-  display: grid;
-  margin-top: 30px;
-  gap: 21px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.form-fieldset {
+.toilet-section {
+  min-width: 0;
   padding: 0;
   margin: 0;
   border: 0;
 }
 
-.form-fieldset legend,
-.form-label {
+.toilet-section legend,
+.field-label {
   display: block;
+  padding: 0;
   margin-bottom: 9px;
   color:
-    var(--color-text, #173b38);
+    var(
+      --color-text,
+      #173b38
+    );
   font-size: 12px;
   font-weight: 800;
 }
 
-.category-list {
+.toilet-toggle-list {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      2,
+      minmax(0, 1fr)
+    );
+  gap: 10px;
+}
+
+.toilet-toggle {
   display: flex;
-  flex-wrap: wrap;
+  min-width: 0;
+  min-height: 72px;
+  padding: 13px 14px;
+  align-items: stretch;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px solid #cfe3df;
+  border-radius: 13px;
+  background: #fbfefd;
+  color: #173b38;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.toilet-toggle:hover:not(:disabled) {
+  border-color: #0d9f8c;
+  background: #f1fbf8;
+}
+
+.toilet-toggle--selected {
+  border-color: #0d9f8c;
+  background: #e8f8f4;
+  box-shadow:
+    0 0 0 2px
+    rgba(
+      13,
+      159,
+      140,
+      0.1
+    );
+}
+
+.toilet-toggle:disabled {
+  cursor: default;
+}
+
+.toilet-toggle__top {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.category-button {
-  height: 34px;
-  padding: 0 17px;
-  border: 1px solid transparent;
+.toilet-toggle strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toilet-toggle em {
+  flex-shrink: 0;
+  padding: 3px 7px;
   border-radius: 999px;
-  background:
-    var(--color-mint-100, #e8f7f3);
-  color:
-    var(--color-primary, #0d9f8c);
+  background: #0d9f8c;
+  color: #ffffff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.toilet-toggle small {
+  overflow: hidden;
+  color: #82928f;
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nearby-status,
+.nearby-error {
+  display: flex;
+  min-height: 86px;
+  padding: 18px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid #d7e8e4;
+  border-radius: 13px;
+  background: #f8fcfb;
+  color: #697c79;
+  font-size: 11px;
+  text-align: center;
+}
+
+.nearby-error p {
+  margin: 0;
+}
+
+.retry-button {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid #0d9f8c;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #0d9f8c;
   cursor: pointer;
   font-size: 11px;
   font-weight: 800;
 }
 
-.category-button:hover {
-  border-color:
-    var(--color-primary, #0d9f8c);
-}
-
-.category-button--active {
-  background:
-    var(--color-text, #173b38);
-  color: #ffffff;
-}
-
 .form-field {
-  position: relative;
-  display: grid;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
 }
 
 .form-field input,
 .form-field textarea {
+  display: block;
   width: 100%;
-  border: 1px solid
-    var(--color-border, #d6e6e2);
-  border-radius: 12px;
+  border: 1px solid #cfe3df;
   outline: none;
-  background:
-    var(--color-surface-soft, #fbfefd);
-  color:
-    var(--color-text, #173b38);
-  font: inherit;
-  font-size: 13px;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
+  background: #fbfefd;
+  color: #173b38;
+  font-family: inherit;
+  font-size: 12px;
 }
 
 .form-field input {
-  height: 46px;
-  padding: 0 14px;
+  height: 48px;
+  padding: 0 15px;
+  border-radius: 12px;
 }
 
 .form-field textarea {
-  min-height: 150px;
-  padding: 14px;
+  min-height: 145px;
+  padding: 14px 15px;
+  border-radius: 12px;
+  line-height: 1.7;
   resize: vertical;
-  line-height: 1.65;
 }
 
 .form-field input:focus,
 .form-field textarea:focus {
-  border-color:
-    var(--color-primary, #0d9f8c);
+  border-color: #0d9f8c;
+  background: #ffffff;
   box-shadow:
-    0 0 0 3px rgba(13, 159, 140, 0.1);
+    0 0 0 3px
+    rgba(
+      13,
+      159,
+      140,
+      0.09
+    );
 }
 
-.form-field input[aria-invalid="true"],
-.form-field textarea[aria-invalid="true"] {
-  border-color: #d85c5c;
+.field-control--error {
+  border-color: #d95e5e !important;
 }
 
-.form-count {
-  margin-top: 6px;
-  color:
-    var(--color-text-muted, #9aa8a5);
-  font-size: 9px;
-  text-align: right;
-}
-
-.form-help {
+.field-error {
+  display: block;
   margin-top: 7px;
-  color:
-    var(--color-text-muted, #91a09d);
-  font-size: 10px;
+  color: #c54848;
+  font-size: 11px;
 }
 
-.form-error {
+.field-help {
   margin-top: 7px;
-  color: #c64a4a;
-  font-size: 10px;
+  color: #8fa09d;
+  font-size: 11px;
 }
 
-.post-form-actions {
+.author-info {
   display: flex;
-  margin-top: 2px;
-  justify-content: flex-end;
-  gap: 10px;
+  padding: 15px 16px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #d7ece7;
+  border-radius: 12px;
+  background: #f4fbf9;
 }
 
-@media (max-width: 640px) {
-  .post-form-page {
-    padding: 20px 14px 50px;
+.author-info span {
+  color: #0d9f8c;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.author-info strong {
+  color: #173b38;
+  font-size: 12px;
+}
+
+.submit-error {
+  padding: 12px 14px;
+  margin: 0;
+  border-radius: 10px;
+  background: #fff3f3;
+  color: #c54848;
+  font-size: 11px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.cancel-button,
+.submit-button {
+  min-width: 104px;
+  height: 44px;
+  padding: 0 22px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cancel-button {
+  border: 1px solid #cfe3df;
+  background: #ffffff;
+  color: #173b38;
+}
+
+.submit-button {
+  border: 1px solid #0d9f8c;
+  background: #0d9f8c;
+  color: #ffffff;
+}
+
+.cancel-button:disabled,
+.submit-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.form-loading {
+  display: flex;
+  min-height: 420px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.loading-spinner,
+.small-spinner {
+  border: 3px solid #dce9e6;
+  border-top-color: #0d9f8c;
+  border-radius: 50%;
+  animation:
+    form-spin
+    0.8s linear infinite;
+}
+
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+}
+
+.small-spinner {
+  width: 22px;
+  height: 22px;
+}
+
+@keyframes form-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 700px) {
+  .form-page {
+    width: min(
+      100% - 24px,
+      780px
+    );
+    padding: 26px 0 70px;
   }
 
-  .post-form-card {
-    padding: 26px 20px 22px;
+  .form-card {
+    padding: 28px 20px 22px;
   }
 
-  .post-form-header h1 {
-    font-size: 23px;
+  .toilet-toggle-list {
+    grid-template-columns: 1fr;
   }
 
-  .post-form-actions {
+  .form-actions {
     display: grid;
     grid-template-columns:
-      repeat(2, minmax(0, 1fr));
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
+  }
+
+  .cancel-button,
+  .submit-button {
+    width: 100%;
+    min-width: 0;
   }
 }
 </style>
