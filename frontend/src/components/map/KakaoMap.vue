@@ -60,7 +60,7 @@ let currentLocationImage = null;
 let infoWindow = null;
 let currentLocationMarker = null;
 
-let localCurrentLocation = null;
+let currentLocation = null;
 let pendingRouteToilet = null;
 let activeRouteToiletId = null;
 
@@ -276,6 +276,49 @@ const getPlaceType = (toilet) => {
     toilet?.placeType ??
     toilet?.place_type ??
     "PUBLIC_TOILET"
+  );
+};
+
+const toPositiveIntegerOrNull = (
+  value,
+) => {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const normalizedValue =
+    typeof value === "string" &&
+    value.includes(":")
+      ? value.split(":").at(-1)
+      : value;
+
+  const number =
+    Number(normalizedValue);
+
+  return Number.isInteger(number) &&
+    number >= 1
+    ? number
+    : null;
+};
+
+const getRoutePlaceId = (toilet) => {
+  const placeType =
+    getPlaceType(toilet);
+
+  const placeId =
+    placeType ===
+    "PRIVATE_FACILITY_CANDIDATE"
+      ? toilet?.candidateId ??
+        toilet?.candidate_id
+      : toilet?.toiletId ??
+        toilet?.toilet_id;
+
+  return toPositiveIntegerOrNull(
+    placeId ?? getToiletId(toilet),
   );
 };
 
@@ -577,17 +620,17 @@ const drawRoutePolyline = (
 const requestRouteToToilet = async (
   toilet,
 ) => {
-  const toiletId =
-    Number(
-      getToiletId(toilet),
-    );
+  const selectedToiletId =
+    getToiletId(toilet);
+
+  const placeId =
+    getRoutePlaceId(toilet);
 
   if (
-    !Number.isInteger(toiletId) ||
-    toiletId < 1
+    placeId === null
   ) {
     routeError.value =
-      "화장실 ID가 올바르지 않습니다.";
+      "장소 ID가 올바르지 않습니다.";
 
     return;
   }
@@ -614,11 +657,18 @@ const requestRouteToToilet = async (
    * 현재 위치를 아직 받지 못했다면
    * 목적지를 임시 저장하고 위치부터 요청
    */
-  if (!localCurrentLocation) {
+  if (!currentLocation) {
     pendingRouteToilet =
       toilet;
 
+    routeAbortController?.abort();
+    routeAbortController = null;
+
+    removeRoutePolyline();
+
+    routeLoading.value = true;
     routeError.value = "";
+    routeSummary.value = null;
 
     requestCurrentLocation({
       requestedByUser: true,
@@ -629,12 +679,12 @@ const requestRouteToToilet = async (
 
   const startLatitude =
     Number(
-      localCurrentLocation.latitude,
+      currentLocation.latitude,
     );
 
   const startLongitude =
     Number(
-      localCurrentLocation.longitude,
+      currentLocation.longitude,
     );
 
   if (
@@ -675,7 +725,7 @@ const requestRouteToToilet = async (
         getPlaceType(toilet),
 
       place_id:
-        String(toiletId),
+        String(placeId),
 
       start_latitude:
         String(startLatitude),
@@ -743,7 +793,7 @@ const requestRouteToToilet = async (
     );
 
     activeRouteToiletId =
-      toiletId;
+      selectedToiletId;
 
     routeSummary.value = {
       name:
@@ -1245,6 +1295,9 @@ const renderToiletMarkers = () => {
               "[화장실 마커 클릭]",
               {
                 toiletId:
+                  getRoutePlaceId(
+                    clickedToilet,
+                  ) ??
                   getToiletId(
                     clickedToilet,
                   ),
@@ -1320,7 +1373,7 @@ const renderCurrentLocation = ({
     return;
   }
 
-  localCurrentLocation = {
+  currentLocation = {
     latitude:
       numericLatitude,
 
@@ -1426,6 +1479,13 @@ const requestCurrentLocation = ({
           longitude,
         )
       ) {
+        if (pendingRouteToilet) {
+          routeLoading.value =
+            false;
+          routeError.value =
+            "브라우저에서 올바른 위치 좌표를 받지 못했습니다.";
+        }
+
         pendingRouteToilet =
           null;
 
@@ -1448,7 +1508,14 @@ const requestCurrentLocation = ({
           longitude,
         )
       ) {
-        localCurrentLocation =
+        if (pendingRouteToilet) {
+          routeLoading.value =
+            false;
+          routeError.value =
+            "브라우저가 대한민국 밖의 위치를 반환했습니다. 위치 설정을 확인해주세요.";
+        }
+
+        currentLocation =
           null;
 
         pendingRouteToilet =
@@ -1530,10 +1597,7 @@ const requestCurrentLocation = ({
     },
 
     (error) => {
-      localCurrentLocation =
-        null;
-
-      pendingRouteToilet =
+      currentLocation =
         null;
 
       const messages = {
@@ -1547,14 +1611,26 @@ const requestCurrentLocation = ({
           "현재 위치 확인 시간이 초과되었습니다. 위치 설정을 확인해주세요.",
       };
 
+      const message =
+        messages[
+          error.code
+        ] ??
+        "현재 위치를 불러오지 못했습니다.";
+
+      if (pendingRouteToilet) {
+        routeLoading.value =
+          false;
+        routeError.value =
+          message;
+      }
+
+      pendingRouteToilet =
+        null;
+
       emit(
         "location-error",
         {
-          message:
-            messages[
-              error.code
-            ] ??
-            "현재 위치를 불러오지 못했습니다.",
+          message,
 
           requestedByUser,
         },
@@ -1844,7 +1920,7 @@ onBeforeUnmount(() => {
   routeAbortController = null;
 
   currentLocationMarker = null;
-  localCurrentLocation = null;
+  currentLocation = null;
 
   pendingRouteToilet = null;
   activeRouteToiletId = null;
@@ -1875,28 +1951,35 @@ defineExpose({
       aria-label="현재 위치 주변 공공화장실 지도"
     />
 
-    <div
-      v-if="isLoading"
-      class="kakao-map__state"
+    <Transition
+      name="map-state"
+      mode="out-in"
     >
-      카카오맵을 불러오는 중입니다.
-    </div>
+      <div
+        v-if="isLoading"
+        key="loading"
+        class="kakao-map__state"
+      >
+        카카오맵을 불러오는 중입니다.
+      </div>
 
-    <div
-      v-else-if="errorMessage"
-      class="
-        kakao-map__state
-        kakao-map__state--error
-      "
-    >
-      <strong>
-        지도를 표시하지 못했습니다.
-      </strong>
+      <div
+        v-else-if="errorMessage"
+        key="error"
+        class="
+          kakao-map__state
+          kakao-map__state--error
+        "
+      >
+        <strong>
+          지도를 표시하지 못했습니다.
+        </strong>
 
-      <span>
-        {{ errorMessage }}
-      </span>
-    </div>
+        <span>
+          {{ errorMessage }}
+        </span>
+      </div>
+    </Transition>
 
     <Transition
       name="route-panel"
@@ -2124,6 +2207,30 @@ defineExpose({
   text-align: center;
 }
 
+.map-state-enter-active,
+.map-state-leave-active {
+  transition:
+    opacity 0.32s ease,
+    backdrop-filter 0.32s ease,
+    transform 0.32s
+      cubic-bezier(
+        0.2,
+        0.8,
+        0.2,
+        1
+      );
+}
+
+.map-state-enter-from,
+.map-state-leave-to {
+  opacity: 0;
+  transform:
+    translateY(8px)
+    scale(0.985);
+  backdrop-filter:
+    blur(0);
+}
+
 .kakao-map__state--error {
   flex-direction: column;
   gap: 8px;
@@ -2300,8 +2407,9 @@ defineExpose({
 .route-panel-enter-active,
 .route-panel-leave-active {
   transition:
-    opacity 0.22s ease,
-    transform 0.22s
+    opacity 0.32s ease,
+    filter 0.32s ease,
+    transform 0.32s
       cubic-bezier(
         0.2,
         0.8,
@@ -2313,11 +2421,13 @@ defineExpose({
 .route-panel-enter-from,
 .route-panel-leave-to {
   opacity: 0;
+  filter: blur(3px);
   transform:
     translate(
       -50%,
-      12px
-    );
+      14px
+    )
+    scale(0.96);
 }
 
 @keyframes route-spin {

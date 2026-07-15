@@ -60,10 +60,27 @@ const normalizeNearbyToilet = (
     toilet.opening_hours_text ||
     "운영시간 정보 없음";
 
+  const toiletId =
+    toilet.toilet_id ??
+    null;
+
+  const candidateId =
+    toilet.candidate_id ??
+    null;
+
+  const id =
+    toiletId != null
+      ? `toilet:${toiletId}`
+      : candidateId != null
+        ? `candidate:${candidateId}`
+        : toilet.id;
+
   return {
-    id:
-      toilet.toilet_id ??
-      toilet.id,
+    id,
+    toiletId,
+    candidateId,
+    placeType:
+      toilet.place_type ?? "",
 
     name:
       toilet.name ??
@@ -198,8 +215,13 @@ const normalizeToiletDetail = (
     ...summary,
 
     id:
+      summary?.id ??
+      detail.toilet_id,
+
+    toiletId:
       detail.toilet_id ??
-      summary?.id,
+      summary?.toiletId ??
+      null,
 
     name:
       detail.name ??
@@ -486,18 +508,6 @@ const loadToiletDetail = async (
     null;
 
   try {
-    const detail =
-      await getToiletDetail(
-        toiletId,
-      );
-
-    if (
-      requestSequence !==
-      detailRequestSequence
-    ) {
-      return;
-    }
-
     const summary =
       toilets.value.find(
         (toilet) => {
@@ -507,6 +517,41 @@ const loadToiletDetail = async (
           );
         },
       );
+
+    const detailToiletId =
+      summary?.toiletId ??
+      (String(toiletId).startsWith(
+        "toilet:",
+      )
+        ? String(toiletId).slice(7)
+        : toiletId);
+
+    if (
+      !detailToiletId ||
+      String(toiletId).startsWith(
+        "candidate:",
+      )
+    ) {
+      selectedToiletDetail.value =
+        summary ?? null;
+
+      detailStatus.value =
+        summary ? "success" : "idle";
+
+      return;
+    }
+
+    const detail =
+      await getToiletDetail(
+        detailToiletId,
+      );
+
+    if (
+      requestSequence !==
+      detailRequestSequence
+    ) {
+      return;
+    }
 
     selectedToiletDetail.value =
       normalizeToiletDetail(
@@ -902,243 +947,257 @@ const openExternalMap = () => {
             </div>
           </div>
 
-          <section
-            v-if="selectedToilet"
-            class="toilet-detail"
+          <Transition
+            name="detail-panel-swap"
+            mode="out-in"
           >
-            <p class="toilet-detail__eyebrow">
-              선택한 화장실
-            </p>
-
-            <h1 class="toilet-detail__title">
-              {{ selectedToilet.name }}
-            </h1>
-
-            <div class="toilet-detail__meta">
-              <BaseChip tone="soft">
-                {{
-                  selectedToilet.openingType ||
-                  "운영 정보"
-                }}
-              </BaseChip>
-
-              <span>
-                현재 위치 기준 · 약
-                {{ formattedDistance }}
-              </span>
-            </div>
-
-            <div
-              v-if="
-                detailStatus ===
-                'loading'
-              "
-              class="detail-loading"
+            <section
+              v-if="selectedToilet"
+              :key="selectedToilet.id"
+              class="toilet-detail"
             >
-              <div
-                class="detail-loading__spinner"
-              />
-
-              상세 정보를 불러오는 중입니다.
-            </div>
-
-            <div
-              v-else-if="
-                detailStatus === 'error'
-              "
-              class="detail-api-error"
-            >
-              <p>
-                {{ detailMessage }}
+              <p class="toilet-detail__eyebrow">
+                선택한 화장실
               </p>
 
-              <button
-                type="button"
-                @click="
-                  loadToiletDetail(
-                    selectedToiletId,
-                  )
-                "
-              >
-                다시 시도
-              </button>
-            </div>
+              <h1 class="toilet-detail__title">
+                {{ selectedToilet.name }}
+              </h1>
 
-            <section class="information-section">
-              <h2>
-                이용 정보
-              </h2>
-
-              <dl class="information-list">
-                <div>
-                  <dt>주소</dt>
-
-                  <dd>
-                    {{
-                      selectedToilet.address
-                    }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>운영</dt>
-
-                  <dd>
-                    {{
-                      selectedToilet.openingHoursText
-                    }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>유형</dt>
-
-                  <dd>
-                    {{
-                      selectedToilet.toiletType ||
-                      "정보 없음"
-                    }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>관리</dt>
-
-                  <dd>
-                    {{
-                      selectedToilet.managementAgency ||
-                      "정보 없음"
-                    }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>전화</dt>
-
-                  <dd>
-                    {{
-                      selectedToilet.phone ||
-                      "정보 없음"
-                    }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>소유</dt>
-
-                  <dd>
-                    {{
-                      selectedToilet.ownershipType ||
-                      "정보 없음"
-                    }}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt>거리</dt>
-
-                  <dd>
-                    현재 위치에서 직선거리 약
-                    {{ formattedDistance }}
-                  </dd>
-                </div>
-              </dl>
-            </section>
-
-            <section class="information-section">
-              <h2>
-                변기 현황
-              </h2>
-
-              <div class="fixture-grid">
-                <div
-                  v-for="fixture in fixtureItems"
-                  :key="fixture.label"
-                  class="fixture-item"
-                >
-                  <span>
-                    {{ fixture.label }}
-                  </span>
-
-                  <strong>
-                    {{ fixture.value }}
-                  </strong>
-                </div>
-              </div>
-            </section>
-
-            <section class="information-section">
-              <h2>
-                편의시설
-              </h2>
-
-              <div class="facility-list">
-                <BaseChip
-                  v-for="facility in selectedToilet.facilities"
-                  :key="facility"
-                  tone="soft"
-                >
-                  {{ facility }}
+              <div class="toilet-detail__meta">
+                <BaseChip tone="soft">
+                  {{
+                    selectedToilet.openingType ||
+                    "운영 정보"
+                  }}
                 </BaseChip>
 
-                <span
-                  v-if="
-                    selectedToilet
-                      .facilities
-                      .length === 0
-                  "
-                  class="empty-facility"
-                >
-                  등록된 편의시설 정보가 없습니다.
+                <span>
+                  현재 위치 기준 · 약
+                  {{ formattedDistance }}
                 </span>
               </div>
+
+              <Transition
+                name="inline-status"
+                mode="out-in"
+              >
+                <div
+                  v-if="
+                    detailStatus ===
+                    'loading'
+                  "
+                  key="loading"
+                  class="detail-loading"
+                >
+                  <div
+                    class="detail-loading__spinner"
+                  />
+
+                  상세 정보를 불러오는 중입니다.
+                </div>
+
+                <div
+                  v-else-if="
+                    detailStatus === 'error'
+                  "
+                  key="error"
+                  class="detail-api-error"
+                >
+                  <p>
+                    {{ detailMessage }}
+                  </p>
+
+                  <button
+                    type="button"
+                    @click="
+                      loadToiletDetail(
+                        selectedToiletId,
+                      )
+                    "
+                  >
+                    다시 시도
+                  </button>
+                </div>
+              </Transition>
+
+              <section class="information-section">
+                <h2>
+                  이용 정보
+                </h2>
+
+                <dl class="information-list">
+                  <div>
+                    <dt>주소</dt>
+
+                    <dd>
+                      {{
+                        selectedToilet.address
+                      }}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>운영</dt>
+
+                    <dd>
+                      {{
+                        selectedToilet.openingHoursText
+                      }}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>유형</dt>
+
+                    <dd>
+                      {{
+                        selectedToilet.toiletType ||
+                        "정보 없음"
+                      }}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>관리</dt>
+
+                    <dd>
+                      {{
+                        selectedToilet.managementAgency ||
+                        "정보 없음"
+                      }}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>전화</dt>
+
+                    <dd>
+                      {{
+                        selectedToilet.phone ||
+                        "정보 없음"
+                      }}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>소유</dt>
+
+                    <dd>
+                      {{
+                        selectedToilet.ownershipType ||
+                        "정보 없음"
+                      }}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>거리</dt>
+
+                    <dd>
+                      현재 위치에서 직선거리 약
+                      {{ formattedDistance }}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section class="information-section">
+                <h2>
+                  변기 현황
+                </h2>
+
+                <div class="fixture-grid">
+                  <div
+                    v-for="fixture in fixtureItems"
+                    :key="fixture.label"
+                    class="fixture-item"
+                  >
+                    <span>
+                      {{ fixture.label }}
+                    </span>
+
+                    <strong>
+                      {{ fixture.value }}
+                    </strong>
+                  </div>
+                </div>
+              </section>
+
+              <section class="information-section">
+                <h2>
+                  편의시설
+                </h2>
+
+                <div class="facility-list">
+                  <BaseChip
+                    v-for="facility in selectedToilet.facilities"
+                    :key="facility"
+                    tone="soft"
+                  >
+                    {{ facility }}
+                  </BaseChip>
+
+                  <span
+                    v-if="
+                      selectedToilet
+                        .facilities
+                        .length === 0
+                    "
+                    class="empty-facility"
+                  >
+                    등록된 편의시설 정보가 없습니다.
+                  </span>
+                </div>
+              </section>
+
+              <BaseButton
+                block
+                size="large"
+                class="external-map-button"
+                @click="openExternalMap"
+              >
+                외부 지도에서 길찾기
+              </BaseButton>
+
+              <p class="detail-notice">
+                실제 운영 정보는 현장 상황과 다를
+                수 있습니다.
+              </p>
             </section>
 
-            <BaseButton
-              block
-              size="large"
-              class="external-map-button"
-              @click="openExternalMap"
+            <section
+              v-else
+              key="empty"
+              class="empty-detail"
             >
-              외부 지도에서 길찾기
-            </BaseButton>
+              <div
+                v-if="
+                  toiletStatus ===
+                  'loading'
+                "
+                class="empty-loading-spinner"
+              />
 
-            <p class="detail-notice">
-              실제 운영 정보는 현장 상황과 다를
-              수 있습니다.
-            </p>
-          </section>
+              <strong>
+                {{
+                  toiletStatus ===
+                  "loading"
+                    ? "주변 화장실을 찾고 있어요"
+                    : "표시할 화장실이 없습니다"
+                }}
+              </strong>
 
-          <section
-            v-else
-            class="empty-detail"
-          >
-            <div
-              v-if="
-                toiletStatus ===
-                'loading'
-              "
-              class="empty-loading-spinner"
-            />
+              <p v-if="toiletMessage">
+                {{ toiletMessage }}
+              </p>
 
-            <strong>
-              {{
-                toiletStatus ===
-                "loading"
-                  ? "주변 화장실을 찾고 있어요"
-                  : "표시할 화장실이 없습니다"
-              }}
-            </strong>
-
-            <p v-if="toiletMessage">
-              {{ toiletMessage }}
-            </p>
-
-            <p v-else>
-              위치 권한을 허용하면 현재 위치
-              주변 화장실을 표시합니다.
-            </p>
-          </section>
+              <p v-else>
+                위치 권한을 허용하면 현재 위치
+                주변 화장실을 표시합니다.
+              </p>
+            </section>
+          </Transition>
 
           <p
             v-if="
@@ -1167,16 +1226,29 @@ const openExternalMap = () => {
             "
           />
 
-          <div class="area-name">
-            {{ areaLabel }}
-          </div>
+          <Transition
+            name="map-chip"
+            mode="out-in"
+          >
+            <div
+              :key="areaLabel"
+              class="area-name"
+            >
+              {{ areaLabel }}
+            </div>
+          </Transition>
 
           <div class="nearby-banner">
             <span>◎</span>
 
-            <strong>
-              {{ nearbyLabel }}
-            </strong>
+            <Transition
+              name="banner-text"
+              mode="out-in"
+            >
+              <strong :key="nearbyLabel">
+                {{ nearbyLabel }}
+              </strong>
+            </Transition>
           </div>
 
           <button
@@ -1429,6 +1501,60 @@ const openExternalMap = () => {
 
 .toilet-detail {
   padding-top: 31px;
+}
+
+.detail-panel-swap-enter-active,
+.detail-panel-swap-leave-active {
+  transition:
+    opacity 0.34s ease,
+    filter 0.34s ease,
+    transform 0.34s
+      cubic-bezier(
+        0.2,
+        0.8,
+        0.2,
+        1
+      );
+}
+
+.detail-panel-swap-enter-from,
+.detail-panel-swap-leave-to {
+  opacity: 0;
+  filter: blur(4px);
+  transform:
+    translateY(12px)
+    scale(0.985);
+}
+
+.inline-status-enter-active,
+.inline-status-leave-active {
+  overflow: hidden;
+  transition:
+    opacity 0.28s ease,
+    max-height 0.28s ease,
+    margin 0.28s ease,
+    transform 0.28s
+      cubic-bezier(
+        0.2,
+        0.8,
+        0.2,
+        1
+      );
+}
+
+.inline-status-enter-from,
+.inline-status-leave-to {
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  transform:
+    translateY(-6px)
+    scale(0.98);
+}
+
+.inline-status-enter-to,
+.inline-status-leave-from {
+  max-height: 120px;
 }
 
 .toilet-detail__eyebrow {
@@ -1764,6 +1890,45 @@ const openExternalMap = () => {
   pointer-events: none;
 }
 
+.map-chip-enter-active,
+.map-chip-leave-active,
+.banner-text-enter-active,
+.banner-text-leave-active {
+  transition:
+    opacity 0.28s ease,
+    filter 0.28s ease,
+    transform 0.28s
+      cubic-bezier(
+        0.2,
+        0.8,
+        0.2,
+        1
+      );
+}
+
+.map-chip-enter-from,
+.map-chip-leave-to {
+  opacity: 0;
+  filter: blur(3px);
+  transform:
+    translateY(-8px)
+    scale(0.96);
+}
+
+.banner-text-enter-from,
+.banner-text-leave-to {
+  opacity: 0;
+  filter: blur(3px);
+  transform:
+    translateY(6px)
+    scale(0.96);
+}
+
+.banner-text-enter-active,
+.banner-text-leave-active {
+  display: inline-block;
+}
+
 .nearby-banner {
   position: absolute;
   z-index: 12;
@@ -1864,6 +2029,16 @@ const openExternalMap = () => {
       0.13
     );
   cursor: pointer;
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s
+      cubic-bezier(
+        0.2,
+        0.8,
+        0.2,
+        1
+      );
 }
 
 .location-button:hover {
