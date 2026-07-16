@@ -32,6 +32,7 @@ const emit = defineEmits([
   "select",
   "location-success",
   "location-error",
+  "ready",
 ]);
 
 const API_BASE_URL = (
@@ -60,7 +61,7 @@ let currentLocationImage = null;
 let infoWindow = null;
 let currentLocationMarker = null;
 
-let currentLocation = null;
+let currentRouteLocation = null;
 let pendingRouteToilet = null;
 let activeRouteToiletId = null;
 
@@ -657,7 +658,7 @@ const requestRouteToToilet = async (
    * 현재 위치를 아직 받지 못했다면
    * 목적지를 임시 저장하고 위치부터 요청
    */
-  if (!currentLocation) {
+  if (!currentRouteLocation) {
     pendingRouteToilet =
       toilet;
 
@@ -679,12 +680,12 @@ const requestRouteToToilet = async (
 
   const startLatitude =
     Number(
-      currentLocation.latitude,
+      currentRouteLocation.latitude,
     );
 
   const startLongitude =
     Number(
-      currentLocation.longitude,
+      currentRouteLocation.longitude,
     );
 
   if (
@@ -1373,7 +1374,7 @@ const renderCurrentLocation = ({
     return;
   }
 
-  currentLocation = {
+  currentRouteLocation = {
     latitude:
       numericLatitude,
 
@@ -1515,7 +1516,7 @@ const requestCurrentLocation = ({
             "브라우저가 대한민국 밖의 위치를 반환했습니다. 위치 설정을 확인해주세요.";
         }
 
-        currentLocation =
+        currentRouteLocation =
           null;
 
         pendingRouteToilet =
@@ -1597,7 +1598,7 @@ const requestCurrentLocation = ({
     },
 
     (error) => {
-      currentLocation =
+      currentRouteLocation =
         null;
 
       const messages = {
@@ -1815,6 +1816,8 @@ const initializeMap = async () => {
         mapContainer.value,
       );
     }
+
+    emit("ready");
   } catch (error) {
     console.error(
       "[카카오맵 초기화 실패]",
@@ -1920,7 +1923,7 @@ onBeforeUnmount(() => {
   routeAbortController = null;
 
   currentLocationMarker = null;
-  currentLocation = null;
+  currentRouteLocation = null;
 
   pendingRouteToilet = null;
   activeRouteToiletId = null;

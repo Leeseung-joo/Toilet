@@ -197,20 +197,17 @@ const submitDelete = async () => {
 };
 
 const openMap = () => {
-  if (!post.value?.toiletName) {
+  if (!post.value?.toiletId) {
     return;
   }
 
-  const keyword =
-    encodeURIComponent(
-      post.value.toiletName,
-    );
-
-  window.open(
-    `https://map.kakao.com/link/search/${keyword}`,
-    "_blank",
-    "noopener,noreferrer",
-  );
+  router.push({
+    name: "home",
+    query: {
+      toiletId:
+        post.value.toiletId,
+    },
+  });
 };
 
 watch(

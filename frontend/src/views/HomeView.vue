@@ -1,8 +1,13 @@
 <script setup>
 import {
   computed,
+  nextTick,
   ref,
+  watch,
 } from "vue";
+import {
+  useRoute,
+} from "vue-router";
 
 import AppShell from "../components/common/AppShell.vue";
 import BaseButton from "../components/common/BaseButton.vue";
@@ -14,11 +19,14 @@ import {
   getToiletDetail,
 } from "../api/toiletApi.js";
 
+const route = useRoute();
+
 const searchKeyword = ref("");
 const selectedToiletId = ref(null);
 const selectedToiletDetail = ref(null);
 
 const kakaoMapRef = ref(null);
+const mapReady = ref(false);
 
 const currentLocation = ref(null);
 const locationStatus = ref("loading");
@@ -32,6 +40,8 @@ const detailStatus = ref("idle");
 const detailMessage = ref("");
 
 let detailRequestSequence = 0;
+let activeRouteQueryKey = "";
+let routeQueryInFlightKey = "";
 
 const toNumberOrNull = (value) => {
   const number = Number(value);
@@ -295,6 +305,87 @@ const normalizeToiletDetail = (
       detail.opening_type ||
       openingHoursText,
   };
+};
+
+const normalizeRouteToiletDetail = (
+  detail,
+) => {
+  const normalized =
+    normalizeToiletDetail(
+      detail,
+      null,
+    );
+
+  const toiletId =
+    normalized.toiletId ??
+    detail?.toilet_id ??
+    null;
+
+  return {
+    ...normalized,
+
+    id:
+      toiletId != null
+        ? `toilet:${toiletId}`
+        : normalized.id,
+
+    toiletId,
+    placeType:
+      normalized.placeType ??
+      detail?.place_type ??
+      "PUBLIC_TOILET",
+  };
+};
+
+const getSingleQueryValue = (
+  value,
+) => {
+  return Array.isArray(value)
+    ? value[0]
+    : value;
+};
+
+const requestedToiletId =
+  computed(() => {
+    const queryToiletId =
+      getSingleQueryValue(
+        route.query.toiletId ??
+          route.query.toilet_id,
+      );
+
+    return queryToiletId ===
+      undefined ||
+      queryToiletId === null ||
+      queryToiletId === ""
+      ? ""
+      : String(queryToiletId);
+  });
+
+const getPlainToiletId = (
+  toiletId,
+) => {
+  return String(toiletId ?? "")
+    .replace(/^toilet:/, "");
+};
+
+const findToiletByRequestId = (
+  toiletId,
+) => {
+  const plainToiletId =
+    getPlainToiletId(toiletId);
+
+  return (
+    toilets.value.find(
+      (toilet) => {
+        return (
+          String(toilet.id) ===
+            String(toiletId) ||
+          String(toilet.toiletId) ===
+            plainToiletId
+        );
+      },
+    ) ?? null
+  );
 };
 
 const selectedSummaryToilet =
@@ -646,6 +737,8 @@ const loadNearbyToilets = async (
         firstToilet.id,
       );
 
+      await openRequestedToiletRoute();
+
       return;
     }
 
@@ -676,6 +769,119 @@ const loadNearbyToilets = async (
         : "주변 화장실을 불러오지 못했습니다.";
   }
 };
+
+const ensureRequestedToilet = async (
+  toiletId,
+) => {
+  const existingToilet =
+    findToiletByRequestId(
+      toiletId,
+    );
+
+  if (existingToilet) {
+    return existingToilet;
+  }
+
+  const detail =
+    await getToiletDetail(
+      getPlainToiletId(toiletId),
+    );
+
+  const routeToilet =
+    normalizeRouteToiletDetail(
+      detail,
+    );
+
+  if (
+    routeToilet.id == null ||
+    routeToilet.latitude == null ||
+    routeToilet.longitude == null
+  ) {
+    throw new Error(
+      "선택한 화장실의 위치 정보가 없습니다.",
+    );
+  }
+
+  toilets.value = [
+    routeToilet,
+    ...toilets.value,
+  ];
+
+  return routeToilet;
+};
+
+const openRequestedToiletRoute =
+  async () => {
+    const toiletId =
+      requestedToiletId.value;
+
+    if (
+      !toiletId ||
+      !mapReady.value ||
+      locationStatus.value !==
+        "success"
+    ) {
+      return;
+    }
+
+    if (
+      activeRouteQueryKey ===
+        toiletId ||
+      routeQueryInFlightKey ===
+        toiletId
+    ) {
+      return;
+    }
+
+    routeQueryInFlightKey =
+      toiletId;
+
+    try {
+      const toilet =
+        await ensureRequestedToilet(
+          toiletId,
+        );
+
+      selectedToiletId.value =
+        toilet.id;
+
+      searchKeyword.value = "";
+
+      await loadToiletDetail(
+        toilet.id,
+      );
+
+      await nextTick();
+
+      kakaoMapRef.value?.focusToilet(
+        toilet.id,
+      );
+
+      kakaoMapRef.value?.requestRouteToToilet(
+        toilet,
+      );
+
+      activeRouteQueryKey =
+        toiletId;
+    } catch (error) {
+      console.error(
+        "[커뮤니티 화장실 경로 연결 실패]",
+        error,
+      );
+
+      toiletMessage.value =
+        error instanceof Error
+          ? error.message
+          : "선택한 화장실 경로를 불러오지 못했습니다.";
+    } finally {
+      if (
+        routeQueryInFlightKey ===
+        toiletId
+      ) {
+        routeQueryInFlightKey = "";
+      }
+    }
+  };
 
 const handleLocationSuccess = async ({
   latitude,
@@ -740,6 +946,11 @@ const handleLocationSuccess = async ({
   );
 };
 
+const handleMapReady = () => {
+  mapReady.value = true;
+  void openRequestedToiletRoute();
+};
+
 const handleLocationError = ({
   message,
   requestedByUser = false,
@@ -789,6 +1000,27 @@ const selectToilet = async (
     toilet.id,
   );
 };
+
+watch(
+  requestedToiletId,
+  () => {
+    activeRouteQueryKey = "";
+    routeQueryInFlightKey = "";
+
+    void openRequestedToiletRoute();
+  },
+);
+
+watch(
+  [
+    () => mapReady.value,
+    () => locationStatus.value,
+    () => toilets.value.length,
+  ],
+  () => {
+    void openRequestedToiletRoute();
+  },
+);
 
 const selectToiletFromSearch =
   async (toilet) => {
@@ -1224,6 +1456,7 @@ const openExternalMap = () => {
             @location-error="
               handleLocationError
             "
+            @ready="handleMapReady"
           />
 
           <Transition
