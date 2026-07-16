@@ -86,6 +86,7 @@ let activeRouteToiletId = null;
 
 let routePolyline = null;
 let routeAbortController = null;
+let routeAnimationFrame = null;
 
 let resizeObserver = null;
 
@@ -628,6 +629,13 @@ const normalizeRoutePoints = (
  * 기존 Polyline만 지도에서 제거
  */
 const removeRoutePolyline = () => {
+  if (routeAnimationFrame) {
+    cancelAnimationFrame(
+      routeAnimationFrame,
+    );
+    routeAnimationFrame = null;
+  }
+
   if (!routePolyline) {
     return;
   }
@@ -698,7 +706,7 @@ const drawRoutePolyline = (
   routePolyline =
     new kakao.maps.Polyline({
       map,
-      path,
+      path: path.slice(0, 2),
 
       /*
        * 실제 도보 경로를 나타내는 초록 선
@@ -733,6 +741,64 @@ const drawRoutePolyline = (
     90,
     90,
   );
+
+  const startTime =
+    performance.now();
+  const duration =
+    Math.min(
+      Math.max(path.length * 18, 450),
+      1400,
+    );
+
+  const animateRoute = (now) => {
+    if (!routePolyline) {
+      routeAnimationFrame = null;
+      return;
+    }
+
+    const progress =
+      Math.min(
+        (now - startTime) /
+          duration,
+        1,
+      );
+
+    const easedProgress =
+      1 -
+      Math.pow(
+        1 - progress,
+        3,
+      );
+
+    const visibleCount =
+      Math.max(
+        2,
+        Math.ceil(
+          easedProgress *
+            path.length,
+        ),
+      );
+
+    routePolyline.setPath(
+      path.slice(0, visibleCount),
+    );
+
+    if (progress < 1) {
+      routeAnimationFrame =
+        requestAnimationFrame(
+          animateRoute,
+        );
+      return;
+    }
+
+    routePolyline.setPath(path);
+    routeAnimationFrame = null;
+  };
+
+  routeAnimationFrame =
+    requestAnimationFrame(
+      animateRoute,
+    );
 };
 
 /*
@@ -2431,6 +2497,7 @@ onBeforeUnmount(() => {
 
   resizeObserver = null;
   routeAbortController = null;
+  routeAnimationFrame = null;
 
   currentLocationMarker = null;
   currentRouteLocation = null;
