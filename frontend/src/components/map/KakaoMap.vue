@@ -352,7 +352,9 @@ const getRoutePlaceId = (toilet) => {
     "PRIVATE_FACILITY_CANDIDATE"
       ? toilet?.candidateId ??
         toilet?.candidate_id
-      : toilet?.toiletId ??
+      : toilet?.placeId ??
+        toilet?.place_id ??
+        toilet?.toiletId ??
         toilet?.toilet_id;
 
   return toPositiveIntegerOrNull(

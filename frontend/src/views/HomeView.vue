@@ -89,6 +89,12 @@ const normalizeNearbyToilet = (
     toilet.candidate_id ??
     null;
 
+  const placeId =
+    toilet.place_id ??
+    toilet.placeId ??
+    toiletId ??
+    candidateId;
+
   const id =
     toiletId != null
       ? `toilet:${toiletId}`
@@ -100,8 +106,15 @@ const normalizeNearbyToilet = (
     id,
     toiletId,
     candidateId,
+    placeId,
     placeType:
-      toilet.place_type ?? "",
+      toilet.place_type ??
+      toilet.placeType ??
+      (toiletId != null
+        ? "PUBLIC_TOILET"
+        : candidateId != null
+          ? "PRIVATE_FACILITY_CANDIDATE"
+          : ""),
 
     name:
       toilet.name ??
@@ -244,6 +257,14 @@ const normalizeToiletDetail = (
       summary?.toiletId ??
       null,
 
+    placeId:
+      detail.place_id ??
+      detail.placeId ??
+      detail.toilet_id ??
+      summary?.placeId ??
+      summary?.toiletId ??
+      null,
+
     name:
       detail.name ??
       summary?.name ??
@@ -341,8 +362,14 @@ const normalizeRouteToiletDetail = (
         : normalized.id,
 
     toiletId,
+    placeId:
+      normalized.placeId ??
+      detail?.place_id ??
+      detail?.placeId ??
+      toiletId,
     placeType:
       normalized.placeType ??
+      detail?.placeType ??
       detail?.place_type ??
       "PUBLIC_TOILET",
   };
@@ -361,7 +388,9 @@ const requestedToiletId =
     const queryToiletId =
       getSingleQueryValue(
         route.query.toiletId ??
-          route.query.toilet_id,
+          route.query.toilet_id ??
+          route.query.placeId ??
+          route.query.place_id,
       );
 
     return queryToiletId ===
@@ -370,6 +399,21 @@ const requestedToiletId =
       queryToiletId === ""
       ? ""
       : String(queryToiletId);
+  });
+
+const requestedPlaceType =
+  computed(() => {
+    const placeType =
+      getSingleQueryValue(
+        route.query.placeType ??
+          route.query.place_type,
+      );
+
+    return placeType
+      ? String(placeType)
+      : requestedToiletId.value
+        ? "PUBLIC_TOILET"
+        : "";
   });
 
 const getPlainToiletId = (
@@ -392,12 +436,89 @@ const findToiletByRequestId = (
           String(toilet.id) ===
             String(toiletId) ||
           String(toilet.toiletId) ===
+            plainToiletId ||
+          String(toilet.placeId) ===
             plainToiletId
         );
       },
     ) ?? null
   );
 };
+
+const createRequestedPlaceSummary =
+  (placeId) => {
+    if (
+      requestedPlaceType.value !==
+      "PRIVATE_FACILITY_CANDIDATE"
+    ) {
+      return null;
+    }
+
+    const latitude =
+      toNumberOrNull(
+        getSingleQueryValue(
+          route.query.latitude,
+        ),
+      );
+
+    const longitude =
+      toNumberOrNull(
+        getSingleQueryValue(
+          route.query.longitude,
+        ),
+      );
+
+    if (
+      latitude === null ||
+      longitude === null
+    ) {
+      return null;
+    }
+
+    const plainPlaceId =
+      getPlainToiletId(placeId);
+
+    return {
+      id: `candidate:${plainPlaceId}`,
+      toiletId: null,
+      candidateId:
+        plainPlaceId || null,
+      placeId:
+        plainPlaceId || null,
+      placeType:
+        requestedPlaceType.value,
+      name:
+        getSingleQueryValue(
+          route.query.name,
+        ) || "이름 없는 화장실",
+      address:
+        "주소 정보 없음",
+      roadAddress: "",
+      lotAddress: "",
+      latitude,
+      longitude,
+      distanceMeters: null,
+      openingHoursText:
+        "운영시간 정보 없음",
+      toiletType: "",
+      managementAgency: "",
+      phone: "",
+      openingType: "민간시설 후보",
+      ownershipType: "",
+      fixture: {},
+      facility: {},
+      facilities: [],
+      rating: 0,
+      reviewCount: 0,
+      cleanliness: 0,
+      operationHours:
+        "운영시간 정보 없음",
+      operationStatus:
+        "운영시간 정보 없음",
+      report:
+        "최근 이용 제보가 없습니다.",
+    };
+  };
 
 const selectedSummaryToilet =
   computed(() => {
@@ -702,6 +823,7 @@ const loadToiletDetail = async (
       );
 
     const detailToiletId =
+      summary?.placeId ??
       summary?.toiletId ??
       (String(toiletId).startsWith(
         "toilet:",
@@ -942,6 +1064,20 @@ const ensureRequestedToilet = async (
 
   if (existingToilet) {
     return existingToilet;
+  }
+
+  const requestedPlaceSummary =
+    createRequestedPlaceSummary(
+      toiletId,
+    );
+
+  if (requestedPlaceSummary) {
+    toilets.value = [
+      requestedPlaceSummary,
+      ...toilets.value,
+    ];
+
+    return requestedPlaceSummary;
   }
 
   const detail =

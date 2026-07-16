@@ -6,6 +6,9 @@ import {
   ref,
   watch,
 } from "vue";
+import {
+  useRouter,
+} from "vue-router";
 
 import {
   sendChatMessage,
@@ -19,6 +22,8 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close"]);
+
+const router = useRouter();
 
 const quickQuestions = [
   "가장 가까운 화장실 알려줘",
@@ -41,6 +46,7 @@ const messages = ref([
 const inputMessage = ref("");
 const sending = ref(false);
 const currentLocation = ref(null);
+const conversationId = ref("");
 const messageListRef = ref(null);
 const inputRef = ref(null);
 
@@ -159,16 +165,81 @@ const getCurrentLocation = () => {
   );
 };
 
+const normalizePlaceType = (place) => {
+  const rawPlaceType =
+    place.place_type ??
+    place.placeType ??
+    place.type ??
+    place.category ??
+    "";
+
+  const placeType = String(
+    rawPlaceType,
+  ).toUpperCase();
+
+  if (
+    placeType === "PUBLIC_TOILET" ||
+    placeType === "TOILET"
+  ) {
+    return "PUBLIC_TOILET";
+  }
+
+  if (
+    placeType ===
+      "PRIVATE_FACILITY_CANDIDATE" ||
+    placeType === "CANDIDATE"
+  ) {
+    return "PRIVATE_FACILITY_CANDIDATE";
+  }
+
+  if (placeType === "RESTAURANT") {
+    return "RESTAURANT";
+  }
+
+  if (
+    place.toilet_id != null ||
+    place.toiletId != null
+  ) {
+    return "PUBLIC_TOILET";
+  }
+
+  if (
+    place.candidate_id != null ||
+    place.candidateId != null
+  ) {
+    return "PRIVATE_FACILITY_CANDIDATE";
+  }
+
+  if (
+    place.restaurant_id != null ||
+    place.restaurantId != null
+  ) {
+    return "RESTAURANT";
+  }
+
+  return "";
+};
+
+const normalizePlaceId = (place) => {
+  return (
+    place.place_id ??
+    place.placeId ??
+    place.toilet_id ??
+    place.toiletId ??
+    place.candidate_id ??
+    place.candidateId ??
+    place.restaurant_id ??
+    place.restaurantId ??
+    place.id ??
+    null
+  );
+};
+
 const normalizePlace = (place) => {
   return {
     placeType:
-      place.place_type ??
-      place.placeType ??
-      "",
-    placeId:
-      place.place_id ??
-      place.placeId ??
-      null,
+      normalizePlaceType(place),
+    placeId: normalizePlaceId(place),
     name:
       place.name ??
       "이름 없는 장소",
@@ -199,6 +270,22 @@ const normalizePlaces = (places) => {
   return places.map(normalizePlace);
 };
 
+const getResponseConversationId = (
+  response,
+) => {
+  const nextConversationId =
+    response?.conversationId ??
+    response?.conversation_id ??
+    response?.conversation?.id ??
+    response?.threadId ??
+    response?.thread_id ??
+    "";
+
+  return nextConversationId
+    ? String(nextConversationId)
+    : "";
+};
+
 const formatDistance = (distance) => {
   const meters = Number(distance);
 
@@ -226,6 +313,30 @@ const getPlaceTypeLabel = (
 };
 
 const openPlaceOnMap = (place) => {
+  const placeType =
+    place.placeType ||
+    "PUBLIC_TOILET";
+
+  if (
+    place.placeId &&
+    placeType !== "RESTAURANT"
+  ) {
+    router.push({
+      name: "home",
+      query: {
+        placeId: String(place.placeId),
+        toiletId: String(place.placeId),
+        placeType,
+        name: place.name,
+        latitude: String(place.latitude),
+        longitude: String(place.longitude),
+      },
+    });
+
+    closeWidget();
+    return;
+  }
+
   if (
     !Number.isFinite(place.latitude) ||
     !Number.isFinite(place.longitude)
@@ -237,7 +348,6 @@ const openPlaceOnMap = (place) => {
     place.name,
   );
 
-  // TODO: 홈 화면의 카카오맵 query 연동이 추가되면 내부 지도 이동으로 교체합니다.
   window.open(
     `https://map.kakao.com/link/map/${name},${place.latitude},${place.longitude}`,
     "_blank",
@@ -310,6 +420,9 @@ const sendMessage = async (
       message,
       latitude,
       longitude,
+      conversationId:
+        conversationId.value ||
+        null,
     });
 
     const response =
@@ -317,11 +430,24 @@ const sendMessage = async (
         message,
         latitude,
         longitude,
+        conversationId:
+          conversationId.value ||
+          undefined,
         signal:
           requestController.signal,
       });
 
     console.log("[챗봇 API 응답]", response);
+
+    const nextConversationId =
+      getResponseConversationId(
+        response,
+      );
+
+    if (nextConversationId) {
+      conversationId.value =
+        nextConversationId;
+    }
 
     const responseMessage =
       typeof response?.message ===

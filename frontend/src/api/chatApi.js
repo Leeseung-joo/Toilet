@@ -52,6 +52,7 @@ export const sendChatMessage = async ({
   message,
   latitude,
   longitude,
+  conversationId,
   signal,
 }) => {
   const trimmedMessage =
@@ -66,6 +67,19 @@ export const sendChatMessage = async ({
   let response;
 
   try {
+    const requestBody = {
+      message: trimmedMessage,
+      latitude,
+      longitude,
+    };
+
+    if (conversationId) {
+      requestBody.conversationId =
+        conversationId;
+      requestBody.conversation_id =
+        conversationId;
+    }
+
     response = await fetch(
       `${API_BASE_URL}/api/v1/chat`,
       {
@@ -75,11 +89,7 @@ export const sendChatMessage = async ({
           "Content-Type":
             "application/json",
         },
-        body: JSON.stringify({
-          message: trimmedMessage,
-          latitude,
-          longitude,
-        }),
+        body: JSON.stringify(requestBody),
         signal,
       },
     );
