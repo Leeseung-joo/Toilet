@@ -56,6 +56,8 @@ const FALLBACK_CENTER = {
   longitude: 127.3845,
 };
 
+const DEFAULT_FOCUS_LEVEL = 3;
+
 const mapContainer = ref(null);
 
 const isLoading = ref(true);
@@ -1880,7 +1882,7 @@ const renderCurrentLocation = ({
   );
 
   if (center) {
-    map.setLevel(4);
+    map.setLevel(DEFAULT_FOCUS_LEVEL);
     map.setCenter(position);
   }
 };
@@ -2163,7 +2165,7 @@ const focusToilet = (
     return;
   }
 
-  map.setLevel(4);
+  map.setLevel(DEFAULT_FOCUS_LEVEL);
 
   map.panTo(
     new getKakao().maps.LatLng(
@@ -2224,7 +2226,7 @@ const initializeMap = async () => {
               ),
             ),
 
-          level: 4,
+          level: DEFAULT_FOCUS_LEVEL,
         },
       );
 

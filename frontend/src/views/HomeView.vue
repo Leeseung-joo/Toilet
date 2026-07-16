@@ -7,6 +7,7 @@ import {
 } from "vue";
 import {
   useRoute,
+  useRouter,
 } from "vue-router";
 
 import AppShell from "../components/common/AppShell.vue";
@@ -23,6 +24,7 @@ import {
 } from "../api/communityApi.js";
 
 const route = useRoute();
+const router = useRouter();
 
 const searchKeyword = ref("");
 const selectedCategory = ref("toilet");
@@ -603,6 +605,19 @@ const formatReviewDate = (dateString) => {
       minute: "2-digit",
     },
   ).format(date);
+};
+
+const openReviewDetail = (review) => {
+  if (!review?.id) {
+    return;
+  }
+
+  router.push({
+    name: "community-detail",
+    params: {
+      postId: review.id,
+    },
+  });
 };
 
 const areaLabel = computed(() => {
@@ -1739,6 +1754,11 @@ const openExternalMap = () => {
                     v-for="review in realtimeReviews"
                     :key="review.id"
                     class="realtime-review-card"
+                    role="button"
+                    tabindex="0"
+                    @click="openReviewDetail(review)"
+                    @keydown.enter.prevent="openReviewDetail(review)"
+                    @keydown.space.prevent="openReviewDetail(review)"
                   >
                     <div class="realtime-review-card__meta">
                       <strong>
@@ -2542,6 +2562,28 @@ const openExternalMap = () => {
     );
   border-radius: 12px;
   background: #f8fcfb;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.realtime-review-card:hover {
+  border-color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  background: #ffffff;
+  box-shadow: var(--shadow-small);
+  transform: translateY(-1px);
+}
+
+.realtime-review-card:focus-visible {
+  outline: 3px solid rgba(13, 159, 140, 0.18);
+  outline-offset: 2px;
 }
 
 .realtime-review-card__meta {
