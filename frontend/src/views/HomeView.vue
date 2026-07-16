@@ -1842,6 +1842,9 @@ const openExternalMap = () => {
           <KakaoMap
             ref="kakaoMapRef"
             :toilets="toilets"
+            :current-location="
+              currentLocation
+            "
             :selected-category="
               selectedCategory
             "

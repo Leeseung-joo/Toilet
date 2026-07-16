@@ -7,6 +7,10 @@ import {
   watch,
 } from "vue";
 
+import {
+  getNearbyRestaurants,
+} from "../../api/toiletApi.js";
+
 const props = defineProps({
   toilets: {
     type: Array,
@@ -68,6 +72,7 @@ let toiletMarkers = [];
 let restaurantMarkers = [];
 let restaurants = [];
 let selectedRestaurantId = null;
+let restaurantRequestSequence = 0;
 let currentLocationImage = null;
 
 let infoWindow = null;
@@ -447,26 +452,44 @@ const formatDuration = (
 };
 
 const normalizeRestaurant = (
-  place,
+  restaurant,
 ) => {
-  const latitude = Number(place?.y);
-  const longitude = Number(place?.x);
+  const latitude = Number(
+    restaurant?.latitude,
+  );
+  const longitude = Number(
+    restaurant?.longitude,
+  );
+  const restaurantId =
+    restaurant?.restaurant_id ??
+    restaurant?.id ??
+    null;
 
   return {
     id:
-      place?.id ??
-      `${place?.place_name}-${place?.x}-${place?.y}`,
+      restaurantId != null
+        ? restaurantId
+        : `${restaurant?.name}-${restaurant?.longitude}-${restaurant?.latitude}`,
+    restaurantId,
     name:
-      place?.place_name ??
+      restaurant?.name ??
       "이름 없는 음식점",
+    category:
+      restaurant?.category ??
+      "음식점",
     address:
-      place?.road_address_name ||
-      place?.address_name ||
+      restaurant?.road_address ||
+      restaurant?.address ||
       "주소 정보 없음",
+    roadAddress:
+      restaurant?.road_address ??
+      "",
     latitude,
     longitude,
     distanceMeters:
-      Number(place?.distance),
+      Number(
+        restaurant?.distance_meters,
+      ),
     imageUrl: "",
   };
 };
@@ -1326,79 +1349,100 @@ const renderRestaurantMarkers =
       nextMarkers;
   };
 
-const loadNearbyRestaurants = () => {
-  if (
-    !map ||
-    !getKakao()?.maps?.services
-  ) {
-    return;
-  }
+const loadNearbyRestaurants =
+  async () => {
+    if (
+      !map ||
+      !getKakao()?.maps
+    ) {
+      return;
+    }
 
-  const kakao = getKakao();
-  const searchLocation =
-    getRestaurantSearchLocation();
-  const places =
-    new kakao.maps.services.Places();
+    const kakao = getKakao();
+    const searchLocation =
+      getRestaurantSearchLocation();
+    const requestSequence =
+      restaurantRequestSequence + 1;
 
-  restaurantStatus.value =
-    "loading";
-  restaurantMessage.value = "";
+    restaurantRequestSequence =
+      requestSequence;
 
-  places.categorySearch(
-    "FD6",
-    (result, status) => {
+    restaurantStatus.value =
+      "loading";
+    restaurantMessage.value = "";
+
+    try {
+      const result =
+        await getNearbyRestaurants({
+          latitude:
+            searchLocation.latitude,
+          longitude:
+            searchLocation.longitude,
+          radiusMeters: 3000,
+          limit: 5,
+        });
+
       if (
         props.selectedCategory !==
-        "restaurant"
+          "restaurant" ||
+        requestSequence !==
+          restaurantRequestSequence
       ) {
         return;
       }
 
-      if (
-        status ===
-        kakao.maps.services.Status.OK
-      ) {
-        restaurants = result
-          .map(normalizeRestaurant)
-          .filter((restaurant) => {
-            return isValidCoordinate(
+      restaurants = result
+        .map(normalizeRestaurant)
+        .filter((restaurant) => {
+          return isValidCoordinate(
+            restaurant.latitude,
+            restaurant.longitude,
+          );
+        });
+
+      selectedRestaurantId = null;
+      clearRestaurantMarkers();
+      renderRestaurantMarkers();
+
+      if (restaurants.length === 0) {
+        restaurantStatus.value =
+          "empty";
+        restaurantMessage.value =
+          "주변 음식점을 찾지 못했습니다.";
+
+        return;
+      }
+
+      restaurantStatus.value =
+        "success";
+      restaurantMessage.value = "";
+
+      const bounds =
+        new kakao.maps.LatLngBounds();
+
+      restaurants.forEach(
+        (restaurant) => {
+          bounds.extend(
+            new kakao.maps.LatLng(
               restaurant.latitude,
               restaurant.longitude,
-            );
-          });
-
-        selectedRestaurantId = null;
-        restaurantStatus.value =
-          "success";
-        restaurantMessage.value = "";
-
-        clearRestaurantMarkers();
-        renderRestaurantMarkers();
-
-        if (restaurants.length > 0) {
-          const bounds =
-            new kakao.maps.LatLngBounds();
-
-          restaurants.forEach(
-            (restaurant) => {
-              bounds.extend(
-                new kakao.maps.LatLng(
-                  restaurant.latitude,
-                  restaurant.longitude,
-                ),
-              );
-            },
+            ),
           );
+        },
+      );
 
-          map.setBounds(
-            bounds,
-            90,
-            90,
-            90,
-            90,
-          );
-        }
-
+      map.setBounds(
+        bounds,
+        90,
+        90,
+        90,
+        90,
+      );
+    } catch (error) {
+      if (
+        requestSequence !==
+        restaurantRequestSequence
+      ) {
         return;
       }
 
@@ -1407,30 +1451,12 @@ const loadNearbyRestaurants = () => {
       clearRestaurantMarkers();
 
       restaurantStatus.value =
-        status ===
-        kakao.maps.services.Status.ZERO_RESULT
-          ? "empty"
-          : "error";
-
+        "error";
       restaurantMessage.value =
-        status ===
-        kakao.maps.services.Status.ZERO_RESULT
-          ? "주변 음식점을 찾지 못했습니다."
-          : "주변 음식점을 불러오지 못했습니다.";
-    },
-    {
-      location:
-        new kakao.maps.LatLng(
-          searchLocation.latitude,
-          searchLocation.longitude,
-        ),
-      radius: 1000,
-      sort:
-        kakao.maps.services.SortBy
-          .DISTANCE,
-    },
-  );
-};
+        error?.message ||
+        "주변 음식점을 불러오지 못했습니다.";
+    }
+  };
 
 const switchCategory = (
   category,

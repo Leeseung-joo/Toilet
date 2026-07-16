@@ -119,6 +119,59 @@ export const getNearbyToilets = async ({
 };
 
 /**
+ * 현재 위치 기준 주변 음식점 조회
+ *
+ * GET /api/v1/restaurants/nearby
+ */
+export const getNearbyRestaurants = async ({
+  latitude,
+  longitude,
+  radiusMeters = 3000,
+  limit = 5,
+}) => {
+  if (
+    !Number.isFinite(Number(latitude)) ||
+    !Number.isFinite(Number(longitude))
+  ) {
+    throw new Error(
+      "현재 위치 정보가 올바르지 않습니다.",
+    );
+  }
+
+  const params = new URLSearchParams({
+    latitude: String(latitude),
+    longitude: String(longitude),
+    radius_meters: String(radiusMeters),
+    limit: String(limit),
+  });
+
+  const data = await requestJson(
+    `/api/v1/restaurants/nearby?${params.toString()}`,
+    {
+      method: "GET",
+    },
+  );
+
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  if (Array.isArray(data?.items)) {
+    return data.items;
+  }
+
+  if (Array.isArray(data?.restaurants)) {
+    return data.restaurants;
+  }
+
+  if (Array.isArray(data?.data)) {
+    return data.data;
+  }
+
+  return [];
+};
+
+/**
  * 화장실 상세 조회
  *
  * GET /api/v1/toilets/{toilet_id}
