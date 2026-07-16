@@ -636,8 +636,8 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   background: linear-gradient(
     135deg,
-    #0d9f8c,
-    #087c6e
+    var(--color-primary, #148453),
+    var(--color-primary-hover, #0f6f45)
   );
   color: #ffffff;
 }
@@ -690,7 +690,11 @@ onBeforeUnmount(() => {
     rgba(13, 159, 140, 0.22);
   border-radius: 999px;
   background: #e9f8f5;
-  color: #086f63;
+  color:
+    var(
+      --color-primary-dark,
+      #0b4f33
+    );
   cursor: pointer;
   font-family: inherit;
   font-size: 12px;
@@ -742,7 +746,11 @@ onBeforeUnmount(() => {
   border: 1px solid
     rgba(13, 159, 140, 0.12);
   background: #ffffff;
-  color: #173b38;
+  color:
+    var(
+      --color-text,
+      #153d2a
+    );
   box-shadow:
     0 8px 22px
       rgba(5, 51, 46, 0.08);
@@ -750,7 +758,11 @@ onBeforeUnmount(() => {
 
 .chatbot-message--user
   .chatbot-message__bubble {
-  background: #0d9f8c;
+  background:
+    var(
+      --color-primary,
+      #148453
+    );
   color: #ffffff;
 }
 
@@ -785,14 +797,22 @@ onBeforeUnmount(() => {
 }
 
 .chatbot-place__main strong {
-  color: #173b38;
+  color:
+    var(
+      --color-text,
+      #153d2a
+    );
   font-size: 14px;
   line-height: 1.35;
 }
 
 .chatbot-place__main span {
   flex-shrink: 0;
-  color: #0d9f8c;
+  color:
+    var(
+      --color-primary,
+      #148453
+    );
   font-size: 13px;
   font-weight: 800;
 }
@@ -836,7 +856,11 @@ onBeforeUnmount(() => {
   margin-top: 12px;
   border: 0;
   border-radius: 10px;
-  background: #0d9f8c;
+  background:
+    var(
+      --color-primary,
+      #148453
+    );
   color: #ffffff;
   cursor: pointer;
   font-family: inherit;
@@ -845,7 +869,11 @@ onBeforeUnmount(() => {
 }
 
 .chatbot-place__map:hover {
-  background: #087c6e;
+  background:
+    var(
+      --color-primary-hover,
+      #0f6f45
+    );
 }
 
 .chatbot-widget__form {
@@ -863,14 +891,22 @@ onBeforeUnmount(() => {
   border: 1px solid
     rgba(13, 159, 140, 0.2);
   border-radius: 12px;
-  color: #173b38;
+  color:
+    var(
+      --color-text,
+      #153d2a
+    );
   font-family: inherit;
   font-size: 14px;
   padding: 0 12px;
 }
 
 .chatbot-widget__form input:focus {
-  border-color: #0d9f8c;
+  border-color:
+    var(
+      --color-primary,
+      #148453
+    );
   outline: 3px solid
     rgba(13, 159, 140, 0.16);
 }
@@ -880,7 +916,11 @@ onBeforeUnmount(() => {
   min-height: 42px;
   border: 0;
   border-radius: 12px;
-  background: #0d9f8c;
+  background:
+    var(
+      --color-primary,
+      #148453
+    );
   color: #ffffff;
   cursor: pointer;
   font-family: inherit;

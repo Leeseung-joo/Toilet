@@ -26,10 +26,17 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+
+  selectedCategory: {
+    type: String,
+    default: "toilet",
+  },
 });
 
 const emit = defineEmits([
   "select",
+  "select-restaurant",
+  "update-category",
   "location-success",
   "location-error",
   "ready",
@@ -53,9 +60,14 @@ const errorMessage = ref("");
 const routeLoading = ref(false);
 const routeError = ref("");
 const routeSummary = ref(null);
+const restaurantStatus = ref("idle");
+const restaurantMessage = ref("");
 
 let map = null;
 let toiletMarkers = [];
+let restaurantMarkers = [];
+let restaurants = [];
+let selectedRestaurantId = null;
 let currentLocationImage = null;
 
 let infoWindow = null;
@@ -78,7 +90,10 @@ const getKakao = () => {
  * 카카오맵 SDK 불러오기
  */
 const loadKakaoMapSdk = () => {
-  if (getKakao()?.maps?.Map) {
+  if (
+    getKakao()?.maps?.Map &&
+    getKakao()?.maps?.services
+  ) {
     return Promise.resolve(
       getKakao(),
     );
@@ -110,7 +125,9 @@ const loadKakaoMapSdk = () => {
   window.__kakaoMapSdkPromise =
     new Promise((resolve, reject) => {
       const finishLoading = () => {
-        if (!getKakao()?.maps?.load) {
+        if (
+          !getKakao()?.maps?.load
+        ) {
           reject(
             new Error(
               "카카오맵 SDK 객체를 찾지 못했습니다.",
@@ -121,6 +138,19 @@ const loadKakaoMapSdk = () => {
         }
 
         getKakao().maps.load(() => {
+          if (
+            !getKakao()?.maps
+              ?.services
+          ) {
+            reject(
+              new Error(
+                "카카오맵 services 라이브러리를 찾지 못했습니다.",
+              ),
+            );
+
+            return;
+          }
+
           resolve(getKakao());
         });
       };
@@ -174,7 +204,7 @@ const loadKakaoMapSdk = () => {
         `?appkey=${encodeURIComponent(
           appKey,
         )}` +
-        "&autoload=false";
+        "&autoload=false&libraries=services";
 
       script.addEventListener(
         "load",
@@ -416,6 +446,69 @@ const formatDuration = (
   return `약 ${hours}시간 ${minutes}분`;
 };
 
+const normalizeRestaurant = (
+  place,
+) => {
+  const latitude = Number(place?.y);
+  const longitude = Number(place?.x);
+
+  return {
+    id:
+      place?.id ??
+      `${place?.place_name}-${place?.x}-${place?.y}`,
+    name:
+      place?.place_name ??
+      "이름 없는 음식점",
+    address:
+      place?.road_address_name ||
+      place?.address_name ||
+      "주소 정보 없음",
+    latitude,
+    longitude,
+    distanceMeters:
+      Number(place?.distance),
+    imageUrl: "",
+  };
+};
+
+const getRestaurantSearchLocation =
+  () => {
+    const location =
+      currentRouteLocation ??
+      props.currentLocation;
+
+    const latitude = Number(
+      location?.latitude,
+    );
+    const longitude = Number(
+      location?.longitude,
+    );
+
+    if (
+      isValidCoordinate(
+        latitude,
+        longitude,
+      )
+    ) {
+      return {
+        latitude,
+        longitude,
+      };
+    }
+
+    if (!map || !getKakao()?.maps) {
+      return FALLBACK_CENTER;
+    }
+
+    const center =
+      map.getCenter();
+
+    return {
+      latitude: center.getLat(),
+      longitude: center.getLng(),
+    };
+  };
+
 /*
  * 백엔드 오류 메시지 변환
  */
@@ -581,10 +674,10 @@ const drawRoutePolyline = (
       path,
 
       /*
-       * 실제 도보 경로를 나타내는 파란 선
+       * 실제 도보 경로를 나타내는 초록 선
        */
       strokeWeight: 7,
-      strokeColor: "#2477f3",
+      strokeColor: "#148453",
       strokeOpacity: 0.92,
       strokeStyle: "solid",
 
@@ -870,7 +963,7 @@ const createCurrentLocationImage =
           cx="19"
           cy="19"
           r="16"
-          fill="#2477f3"
+          fill="#148453"
           fill-opacity="0.18"
         />
 
@@ -878,7 +971,7 @@ const createCurrentLocationImage =
           cx="19"
           cy="19"
           r="8"
-          fill="#2477f3"
+          fill="#148453"
           stroke="white"
           stroke-width="3"
         />
@@ -1004,6 +1097,62 @@ const updateToiletMarkerElement = ({
   );
 };
 
+const createRestaurantMarkerElement =
+  (restaurant) => {
+    const element =
+      document.createElement("button");
+
+    element.type = "button";
+    element.className =
+      "restaurant-map-marker";
+    element.setAttribute(
+      "aria-label",
+      `${restaurant.name} 선택`,
+    );
+
+    element.innerHTML = `
+      <img
+        class="restaurant-map-marker__image"
+        src="/image/restaurant-marker.svg"
+        alt=""
+        aria-hidden="true"
+      />
+    `;
+
+    return element;
+  };
+
+const updateRestaurantMarkerElement =
+  ({
+    element,
+    restaurant,
+    selected,
+  }) => {
+    element.classList.toggle(
+      "restaurant-map-marker--selected",
+      selected,
+    );
+
+    element.setAttribute(
+      "aria-label",
+      `${restaurant.name} 선택`,
+    );
+
+    element.setAttribute(
+      "aria-pressed",
+      selected ? "true" : "false",
+    );
+
+    const image =
+      element.querySelector("img");
+
+    if (image) {
+      image.src = selected
+        ? "/image/restaurant-marker-selected.svg"
+        : "/image/restaurant-marker.svg";
+    }
+  };
+
 /*
  * 기존 화장실 마커 제거
  */
@@ -1017,6 +1166,286 @@ const clearToiletMarkers = () => {
   toiletMarkers = [];
 
   infoWindow?.close();
+};
+
+const clearRestaurantMarkers = () => {
+  restaurantMarkers.forEach(
+    ({ marker }) => {
+      marker.setMap(null);
+    },
+  );
+
+  restaurantMarkers = [];
+};
+
+const renderRestaurantMarkers =
+  () => {
+    if (
+      !map ||
+      !getKakao()?.maps ||
+      props.selectedCategory !==
+        "restaurant"
+    ) {
+      return;
+    }
+
+    const kakao = getKakao();
+    const previousMarkers =
+      new Map(
+        restaurantMarkers.map(
+          (markerItem) => [
+            markerItem.key,
+            markerItem,
+          ],
+        ),
+      );
+
+    const nextMarkers = [];
+
+    restaurants.forEach(
+      (restaurant) => {
+        if (
+          !isValidCoordinate(
+            restaurant.latitude,
+            restaurant.longitude,
+          )
+        ) {
+          return;
+        }
+
+        const selected =
+          String(restaurant.id) ===
+          String(selectedRestaurantId);
+
+        const position =
+          new kakao.maps.LatLng(
+            restaurant.latitude,
+            restaurant.longitude,
+          );
+
+        let markerItem =
+          previousMarkers.get(
+            String(restaurant.id),
+          );
+
+        if (markerItem) {
+          previousMarkers.delete(
+            String(restaurant.id),
+          );
+
+          markerItem.restaurant =
+            restaurant;
+          markerItem.position =
+            position;
+
+          markerItem.marker.setPosition(
+            position,
+          );
+          markerItem.marker.setZIndex(
+            selected ? 40 : 15,
+          );
+
+          updateRestaurantMarkerElement(
+            {
+              element:
+                markerItem.element,
+              restaurant,
+              selected,
+            },
+          );
+
+          markerItem.marker.setMap(map);
+        } else {
+          const element =
+            createRestaurantMarkerElement(
+              restaurant,
+            );
+
+          updateRestaurantMarkerElement(
+            {
+              element,
+              restaurant,
+              selected,
+            },
+          );
+
+          const marker =
+            new kakao.maps.CustomOverlay({
+              position,
+              content: element,
+              yAnchor: 1,
+              clickable: true,
+              zIndex:
+                selected ? 40 : 15,
+            });
+
+          marker.setMap(map);
+
+          markerItem = {
+            key: String(
+              restaurant.id,
+            ),
+            marker,
+            element,
+            position,
+            restaurant,
+          };
+
+          element.addEventListener(
+            "click",
+            () => {
+              const clickedRestaurant =
+                markerItem.restaurant;
+
+              selectedRestaurantId =
+                clickedRestaurant.id;
+
+              emit(
+                "select-restaurant",
+                clickedRestaurant,
+              );
+
+              renderRestaurantMarkers();
+            },
+          );
+        }
+
+        nextMarkers.push(
+          markerItem,
+        );
+      },
+    );
+
+    previousMarkers.forEach(
+      ({ marker }) => {
+        marker.setMap(null);
+      },
+    );
+
+    restaurantMarkers =
+      nextMarkers;
+  };
+
+const loadNearbyRestaurants = () => {
+  if (
+    !map ||
+    !getKakao()?.maps?.services
+  ) {
+    return;
+  }
+
+  const kakao = getKakao();
+  const searchLocation =
+    getRestaurantSearchLocation();
+  const places =
+    new kakao.maps.services.Places();
+
+  restaurantStatus.value =
+    "loading";
+  restaurantMessage.value = "";
+
+  places.categorySearch(
+    "FD6",
+    (result, status) => {
+      if (
+        props.selectedCategory !==
+        "restaurant"
+      ) {
+        return;
+      }
+
+      if (
+        status ===
+        kakao.maps.services.Status.OK
+      ) {
+        restaurants = result
+          .map(normalizeRestaurant)
+          .filter((restaurant) => {
+            return isValidCoordinate(
+              restaurant.latitude,
+              restaurant.longitude,
+            );
+          });
+
+        selectedRestaurantId = null;
+        restaurantStatus.value =
+          "success";
+        restaurantMessage.value = "";
+
+        clearRestaurantMarkers();
+        renderRestaurantMarkers();
+
+        if (restaurants.length > 0) {
+          const bounds =
+            new kakao.maps.LatLngBounds();
+
+          restaurants.forEach(
+            (restaurant) => {
+              bounds.extend(
+                new kakao.maps.LatLng(
+                  restaurant.latitude,
+                  restaurant.longitude,
+                ),
+              );
+            },
+          );
+
+          map.setBounds(
+            bounds,
+            90,
+            90,
+            90,
+            90,
+          );
+        }
+
+        return;
+      }
+
+      restaurants = [];
+      selectedRestaurantId = null;
+      clearRestaurantMarkers();
+
+      restaurantStatus.value =
+        status ===
+        kakao.maps.services.Status.ZERO_RESULT
+          ? "empty"
+          : "error";
+
+      restaurantMessage.value =
+        status ===
+        kakao.maps.services.Status.ZERO_RESULT
+          ? "주변 음식점을 찾지 못했습니다."
+          : "주변 음식점을 불러오지 못했습니다.";
+    },
+    {
+      location:
+        new kakao.maps.LatLng(
+          searchLocation.latitude,
+          searchLocation.longitude,
+        ),
+      radius: 1000,
+      sort:
+        kakao.maps.services.SortBy
+          .DISTANCE,
+    },
+  );
+};
+
+const switchCategory = (
+  category,
+) => {
+  if (
+    category ===
+    props.selectedCategory
+  ) {
+    return;
+  }
+
+  emit(
+    "update-category",
+    category,
+  );
 };
 
 const getSelectedToilet = () => {
@@ -1108,7 +1537,7 @@ const openSelectedInfoWindow = () => {
             <span style="
               display:block;
               margin-top:6px;
-              color:#0d9f8c;
+              color:#148453;
               font-size:11px;
               font-weight:700;
               line-height:1.4;
@@ -1139,7 +1568,7 @@ const openSelectedInfoWindow = () => {
       <small style="
         display:block;
         margin-top:8px;
-        color:#2477f3;
+        color:#148453;
         font-size:10px;
         font-weight:700;
       ">
@@ -1166,6 +1595,14 @@ const renderToiletMarkers = () => {
     !map ||
     !getKakao()?.maps
   ) {
+    return;
+  }
+
+  if (
+    props.selectedCategory !==
+    "toilet"
+  ) {
+    clearToiletMarkers();
     return;
   }
 
@@ -1782,7 +2219,14 @@ const initializeMap = async () => {
         zIndex: 100,
       });
 
-    renderToiletMarkers();
+    if (
+      props.selectedCategory ===
+      "restaurant"
+    ) {
+      loadNearbyRestaurants();
+    } else {
+      renderToiletMarkers();
+    }
 
     if (props.currentLocation) {
       renderCurrentLocation({
@@ -1883,6 +2327,34 @@ watch(
   },
 );
 
+watch(
+  () => props.selectedCategory,
+  (category) => {
+    infoWindow?.close();
+
+    if (category === "restaurant") {
+      clearRoute();
+      clearToiletMarkers();
+      selectedRestaurantId = null;
+
+      emit(
+        "select-restaurant",
+        null,
+      );
+
+      loadNearbyRestaurants();
+
+      return;
+    }
+
+    restaurants = [];
+    selectedRestaurantId = null;
+    clearRestaurantMarkers();
+
+    renderToiletMarkers();
+  },
+);
+
 /*
  * 부모에서 전달하는 현재 위치 변경
  */
@@ -1897,6 +2369,13 @@ watch(
       ...location,
       center: false,
     });
+
+    if (
+      props.selectedCategory ===
+      "restaurant"
+    ) {
+      loadNearbyRestaurants();
+    }
   },
   {
     deep: true,
@@ -1911,6 +2390,7 @@ onBeforeUnmount(() => {
   routeAbortController?.abort();
 
   clearToiletMarkers();
+  clearRestaurantMarkers();
   removeRoutePolyline();
 
   currentLocationMarker?.setMap(
@@ -1954,6 +2434,37 @@ defineExpose({
       aria-label="현재 위치 주변 공공화장실 지도"
     />
 
+    <div
+      class="map-category-toggle"
+      aria-label="지도 카테고리"
+      role="group"
+    >
+      <button
+        type="button"
+        :class="{
+          'map-category-toggle__button--active':
+            selectedCategory === 'toilet',
+        }"
+        class="map-category-toggle__button"
+        @click="switchCategory('toilet')"
+      >
+        화장실
+      </button>
+
+      <button
+        type="button"
+        :class="{
+          'map-category-toggle__button--active':
+            selectedCategory ===
+            'restaurant',
+        }"
+        class="map-category-toggle__button"
+        @click="switchCategory('restaurant')"
+      >
+        음식점
+      </button>
+    </div>
+
     <Transition
       name="map-state"
       mode="out-in"
@@ -1990,7 +2501,10 @@ defineExpose({
     >
       <!-- 경로 조회 중 -->
       <div
-        v-if="routeLoading"
+        v-if="
+          selectedCategory ===
+            'toilet' && routeLoading
+        "
         key="loading"
         class="route-status route-status--loading"
       >
@@ -2003,7 +2517,10 @@ defineExpose({
 
       <!-- 경로 조회 오류 -->
       <div
-        v-else-if="routeError"
+        v-else-if="
+          selectedCategory ===
+            'toilet' && routeError
+        "
         key="error"
         class="route-status route-status--error"
       >
@@ -2022,7 +2539,10 @@ defineExpose({
 
       <!-- 경로 요약 -->
       <div
-        v-else-if="routeSummary"
+        v-else-if="
+          selectedCategory ===
+            'toilet' && routeSummary
+        "
         key="summary"
         class="route-summary"
       >
@@ -2065,6 +2585,42 @@ defineExpose({
         </button>
       </div>
     </Transition>
+
+    <Transition
+      name="route-panel"
+      mode="out-in"
+    >
+      <div
+        v-if="
+          selectedCategory ===
+            'restaurant' &&
+          restaurantStatus ===
+            'loading'
+        "
+        key="restaurant-loading"
+        class="route-status route-status--loading"
+      >
+        <span class="route-spinner" />
+
+        <strong>
+          주변 음식점을 불러오는 중입니다.
+        </strong>
+      </div>
+
+      <div
+        v-else-if="
+          selectedCategory ===
+            'restaurant' &&
+          restaurantMessage
+        "
+        key="restaurant-message"
+        class="route-status route-status--error"
+      >
+        <strong>
+          {{ restaurantMessage }}
+        </strong>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -2102,7 +2658,7 @@ defineExpose({
   place-items: center;
   border: 3px solid #ffffff;
   border-radius: 50%;
-  background: #0d9f8c;
+  background: #148453;
   box-shadow:
     0 8px 18px
     rgba(
@@ -2165,7 +2721,7 @@ defineExpose({
 
 .kakao-map :deep(.toilet-map-marker--selected) {
   border-color: #ffffff;
-  background: #086e64;
+  background: #0f6f45;
   box-shadow:
     0 14px 28px
     rgba(
@@ -2188,6 +2744,137 @@ defineExpose({
       0.48
     );
   outline-offset: 4px;
+}
+
+.kakao-map :deep(.restaurant-map-marker) {
+  display: block;
+  width: 44px;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transform:
+    translateY(0)
+    scale(1);
+  transform-origin:
+    50% 100%;
+  transition:
+    transform 220ms
+      cubic-bezier(
+        0.2,
+        0.8,
+        0.2,
+        1
+      ),
+    filter 220ms ease;
+  filter:
+    drop-shadow(
+      0 10px 18px
+        rgba(
+          194,
+          65,
+          12,
+          0.28
+        )
+    );
+}
+
+.kakao-map :deep(.restaurant-map-marker__image) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.kakao-map :deep(.restaurant-map-marker--selected) {
+  transform:
+    translateY(-6px)
+    scale(1.4);
+  filter:
+    drop-shadow(
+      0 16px 28px
+        rgba(
+          194,
+          65,
+          12,
+          0.38
+        )
+    );
+}
+
+.kakao-map :deep(.restaurant-map-marker:focus-visible) {
+  outline: 3px solid
+    rgba(
+      249,
+      115,
+      22,
+      0.45
+    );
+  outline-offset: 4px;
+}
+
+.map-category-toggle {
+  display: none;
+  position: absolute;
+  z-index: 160;
+  top: 20px;
+  right: 82px;
+  min-height: 42px;
+  padding: 4px;
+  border: 1px solid
+    rgba(
+      218,
+      232,
+      229,
+      0.9
+    );
+  border-radius: 999px;
+  background:
+    rgba(
+      255,
+      255,
+      255,
+      0.96
+    );
+  box-shadow:
+    0 8px 20px
+    rgba(
+      25,
+      76,
+      70,
+      0.13
+    );
+}
+
+.map-category-toggle__button {
+  min-width: 66px;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #657976;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.map-category-toggle__button--active {
+  background: #148453;
+  color: #ffffff;
+  box-shadow:
+    0 6px 14px
+    rgba(
+      20,
+      132,
+      83,
+      0.22
+    );
 }
 
 .kakao-map__state {
@@ -2301,7 +2988,7 @@ defineExpose({
   border: 3px solid
     #d8e9e6;
   border-top-color:
-    #2477f3;
+    #148453;
   border-radius: 50%;
   animation:
     route-spin
@@ -2364,9 +3051,9 @@ defineExpose({
     space-between;
   border: 1px solid
     rgba(
-      36,
-      119,
-      243,
+      20,
+      132,
+      83,
       0.2
     );
   background:
@@ -2394,7 +3081,7 @@ defineExpose({
 }
 
 .route-summary__information span {
-  color: #2477f3;
+  color: #148453;
   font-size: 10px;
   font-weight: 800;
 }
@@ -2440,6 +3127,17 @@ defineExpose({
 }
 
 @media (max-width: 700px) {
+  .map-category-toggle {
+    top: 72px;
+    right: 18px;
+  }
+
+  .map-category-toggle__button {
+    min-width: 58px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
   .route-status,
   .route-summary {
     bottom: 18px;

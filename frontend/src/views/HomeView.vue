@@ -22,8 +22,10 @@ import {
 const route = useRoute();
 
 const searchKeyword = ref("");
+const selectedCategory = ref("toilet");
 const selectedToiletId = ref(null);
 const selectedToiletDetail = ref(null);
+const selectedRestaurant = ref(null);
 
 const kakaoMapRef = ref(null);
 const mapReady = ref(false);
@@ -472,6 +474,27 @@ const formattedDistance = computed(() => {
   ).toFixed(1)}km`;
 });
 
+const formattedRestaurantDistance =
+  computed(() => {
+    const distance =
+      selectedRestaurant.value
+        ?.distanceMeters;
+
+    if (!Number.isFinite(distance)) {
+      return "정보 없음";
+    }
+
+    if (distance < 1000) {
+      return `${Math.round(
+        distance,
+      )}m`;
+    }
+
+    return `${(
+      distance / 1000
+    ).toFixed(1)}km`;
+  });
+
 const fixtureItems = computed(() => {
   const fixture =
     selectedToilet.value
@@ -554,6 +577,13 @@ const areaLabel = computed(() => {
 });
 
 const nearbyLabel = computed(() => {
+  if (
+    selectedCategory.value ===
+    "restaurant"
+  ) {
+    return "현재 위치 주변 음식점";
+  }
+
   if (
     locationStatus.value ===
     "loading"
@@ -951,6 +981,25 @@ const handleMapReady = () => {
   void openRequestedToiletRoute();
 };
 
+const handleCategoryUpdate = (
+  category,
+) => {
+  selectedCategory.value =
+    category;
+
+  searchKeyword.value = "";
+
+  selectedRestaurant.value =
+    null;
+};
+
+const selectRestaurant = (
+  restaurant,
+) => {
+  selectedRestaurant.value =
+    restaurant;
+};
+
 const handleLocationError = ({
   message,
   requestedByUser = false,
@@ -974,6 +1023,9 @@ const handleLocationError = ({
   selectedToiletDetail.value =
     null;
 
+  selectedRestaurant.value =
+    null;
+
   toiletStatus.value =
     "idle";
 
@@ -993,6 +1045,9 @@ const selectToilet = async (
 
   selectedToiletId.value =
     toilet.id;
+
+  selectedRestaurant.value =
+    null;
 
   searchKeyword.value = "";
 
@@ -1087,7 +1142,52 @@ const openExternalMap = () => {
     <div class="home-view">
       <div class="home-layout">
         <aside class="detail-panel">
-          <div class="search-area">
+          <div
+            class="category-panel-toggle"
+            aria-label="지도 카테고리"
+            role="group"
+          >
+            <button
+              type="button"
+              class="category-panel-toggle__button"
+              :class="{
+                'category-panel-toggle__button--active':
+                  selectedCategory === 'toilet',
+              }"
+              @click="
+                handleCategoryUpdate(
+                  'toilet',
+                )
+              "
+            >
+              화장실
+            </button>
+
+            <button
+              type="button"
+              class="category-panel-toggle__button"
+              :class="{
+                'category-panel-toggle__button--active':
+                  selectedCategory ===
+                  'restaurant',
+              }"
+              @click="
+                handleCategoryUpdate(
+                  'restaurant',
+                )
+              "
+            >
+              음식점
+            </button>
+          </div>
+
+          <div
+            v-if="
+              selectedCategory ===
+              'toilet'
+            "
+            class="search-area"
+          >
             <form
               class="search-box"
               @submit.prevent="searchToilet"
@@ -1184,7 +1284,93 @@ const openExternalMap = () => {
             mode="out-in"
           >
             <section
-              v-if="selectedToilet"
+              v-if="
+                selectedCategory ===
+                  'restaurant' &&
+                selectedRestaurant
+              "
+              :key="`restaurant-${selectedRestaurant.id}`"
+              class="restaurant-detail"
+            >
+              <img
+                class="restaurant-detail__image"
+                :src="
+                  selectedRestaurant.imageUrl ||
+                  '/image/restaurant-placeholder.svg'
+                "
+                :alt="`${selectedRestaurant.name} 대표 이미지`"
+              />
+
+              <p class="toilet-detail__eyebrow">
+                선택한 음식점
+              </p>
+
+              <h1 class="toilet-detail__title">
+                {{ selectedRestaurant.name }}
+              </h1>
+
+              <div class="toilet-detail__meta">
+                <BaseChip tone="soft">
+                  음식점
+                </BaseChip>
+
+                <span>
+                  현재 위치 기준 · 약
+                  {{
+                    formattedRestaurantDistance
+                  }}
+                </span>
+              </div>
+
+              <section class="information-section">
+                <h2>
+                  장소 정보
+                </h2>
+
+                <dl class="information-list">
+                  <div>
+                    <dt>주소</dt>
+
+                    <dd>
+                      {{
+                        selectedRestaurant.address
+                      }}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt>거리</dt>
+
+                    <dd>
+                      현재 위치에서 직선거리 약
+                      {{
+                        formattedRestaurantDistance
+                      }}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+            </section>
+
+            <section
+              v-else-if="
+                selectedCategory ===
+                'restaurant'
+              "
+              key="restaurant-empty"
+              class="empty-detail"
+            >
+              <strong>
+                음식점 선택
+              </strong>
+
+              <p>
+                지도에서 음식점을 선택해 주세요.
+              </p>
+            </section>
+
+            <section
+              v-else-if="selectedToilet"
               :key="selectedToilet.id"
               class="toilet-detail"
             >
@@ -1446,10 +1632,19 @@ const openExternalMap = () => {
           <KakaoMap
             ref="kakaoMapRef"
             :toilets="toilets"
+            :selected-category="
+              selectedCategory
+            "
             :selected-toilet-id="
               selectedToiletId
             "
             @select="selectToilet"
+            @select-restaurant="
+              selectRestaurant
+            "
+            @update-category="
+              handleCategoryUpdate
+            "
             @location-success="
               handleLocationSuccess
             "
@@ -1564,6 +1759,64 @@ const openExternalMap = () => {
       73,
       68,
       0.05
+    );
+}
+
+.category-panel-toggle {
+  display: grid;
+  min-height: 44px;
+  padding: 4px;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 16px;
+  border: 1px solid
+    rgba(
+      20,
+      132,
+      83,
+      0.16
+    );
+  border-radius: 999px;
+  background: #eef8f0;
+}
+
+.category-panel-toggle__button {
+  min-width: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #2c6841;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.category-panel-toggle__button:hover {
+  background:
+    rgba(
+      20,
+      132,
+      83,
+      0.08
+    );
+}
+
+.category-panel-toggle__button--active {
+  background: #148453;
+  color: #ffffff;
+  box-shadow:
+    0 8px 18px
+    rgba(
+      20,
+      132,
+      83,
+      0.24
     );
 }
 
@@ -1732,8 +1985,24 @@ const openExternalMap = () => {
   text-align: center;
 }
 
-.toilet-detail {
+.toilet-detail,
+.restaurant-detail {
   padding-top: 31px;
+}
+
+.restaurant-detail__image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 22px;
+  object-fit: cover;
+  border: 1px solid
+    var(
+      --color-border,
+      #dce9e6
+    );
+  border-radius: 8px;
+  background: #fff7ed;
 }
 
 .detail-panel-swap-enter-active,

@@ -1,7 +1,7 @@
 :root {
-  --color-primary: #079987;
-  --color-primary-hover: #078473;
-  --color-primary-dark: #064c45;
+  --color-primary: #148453;
+  --color-primary-hover: #0f6f45;
+  --color-primary-dark: #0b4f33;
 
   --color-mint-50: #f4fbfa;
   --color-mint-100: #e4f8f4;
@@ -11,7 +11,7 @@
   --color-surface: #ffffff;
   --color-surface-soft: #f8fcfb;
 
-  --color-text: #123f3b;
+  --color-text: #153d2a;
   --color-text-subtle: #647b77;
   --color-text-muted: #91a09d;
 
