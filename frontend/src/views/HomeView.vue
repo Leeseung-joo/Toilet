@@ -18,6 +18,9 @@ import {
   getNearbyToilets,
   getToiletDetail,
 } from "../api/toiletApi.js";
+import {
+  getCommunityPosts,
+} from "../api/communityApi.js";
 
 const route = useRoute();
 
@@ -40,8 +43,12 @@ const toilets = ref([]);
 
 const detailStatus = ref("idle");
 const detailMessage = ref("");
+const realtimeReviews = ref([]);
+const reviewStatus = ref("idle");
+const reviewMessage = ref("");
 
 let detailRequestSequence = 0;
+let reviewRequestSequence = 0;
 let activeRouteQueryKey = "";
 let routeQueryInFlightKey = "";
 
@@ -558,6 +565,46 @@ const fixtureItems = computed(() => {
   ];
 });
 
+const normalizeReviewPost = (post) => {
+  return {
+    id: post.post_id,
+    nickname:
+      post.nickname ?? "익명",
+    title:
+      post.title ?? "제목 없음",
+    content:
+      post.content ?? "",
+    commentCount:
+      post.comment_count ?? 0,
+    createdAt:
+      post.created_at,
+  };
+};
+
+const formatReviewDate = (dateString) => {
+  if (!dateString) {
+    return "";
+  }
+
+  const date = new Date(dateString);
+
+  if (
+    Number.isNaN(date.getTime())
+  ) {
+    return dateString;
+  }
+
+  return new Intl.DateTimeFormat(
+    "ko-KR",
+    {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    },
+  ).format(date);
+};
+
 const areaLabel = computed(() => {
   if (
     locationStatus.value ===
@@ -702,6 +749,76 @@ const loadToiletDetail = async (
       error instanceof Error
         ? error.message
         : "상세 정보를 불러오지 못했습니다.";
+  }
+};
+
+const loadRealtimeReviews = async (
+  toiletId,
+) => {
+  const requestSequence =
+    ++reviewRequestSequence;
+
+  realtimeReviews.value = [];
+  reviewMessage.value = "";
+
+  const detailToiletId =
+    getPlainToiletId(toiletId);
+
+  if (
+    !detailToiletId ||
+    String(toiletId).startsWith(
+      "candidate:",
+    )
+  ) {
+    reviewStatus.value = "idle";
+    return;
+  }
+
+  reviewStatus.value = "loading";
+
+  try {
+    const response =
+      await getCommunityPosts({
+        toiletId: detailToiletId,
+        page: 1,
+        size: 2,
+      });
+
+    if (
+      requestSequence !==
+      reviewRequestSequence
+    ) {
+      return;
+    }
+
+    realtimeReviews.value = (
+      response?.items ?? []
+    )
+      .slice(0, 2)
+      .map(normalizeReviewPost);
+
+    reviewStatus.value =
+      "success";
+  } catch (error) {
+    if (
+      requestSequence !==
+      reviewRequestSequence
+    ) {
+      return;
+    }
+
+    console.error(
+      "[실시간 후기 조회 실패]",
+      error,
+    );
+
+    reviewStatus.value =
+      "error";
+
+    reviewMessage.value =
+      error instanceof Error
+        ? error.message
+        : "실시간 후기를 불러오지 못했습니다.";
   }
 };
 
@@ -1023,6 +1140,10 @@ const handleLocationError = ({
   selectedToiletDetail.value =
     null;
 
+  realtimeReviews.value = [];
+  reviewStatus.value = "idle";
+  reviewMessage.value = "";
+
   selectedRestaurant.value =
     null;
 
@@ -1063,6 +1184,15 @@ watch(
     routeQueryInFlightKey = "";
 
     void openRequestedToiletRoute();
+  },
+);
+
+watch(
+  selectedToiletId,
+  (toiletId) => {
+    void loadRealtimeReviews(
+      toiletId,
+    );
   },
 );
 
@@ -1566,6 +1696,86 @@ const openExternalMap = () => {
                   >
                     등록된 편의시설 정보가 없습니다.
                   </span>
+                </div>
+              </section>
+
+              <section class="information-section realtime-review-section">
+                <div class="section-title-row">
+                  <h2>
+                    실시간 후기
+                  </h2>
+
+                  <span>
+                    최대 2개
+                  </span>
+                </div>
+
+                <div
+                  v-if="
+                    reviewStatus ===
+                    'loading'
+                  "
+                  class="review-status"
+                >
+                  후기를 불러오는 중입니다.
+                </div>
+
+                <div
+                  v-else-if="
+                    reviewStatus === 'error'
+                  "
+                  class="review-status review-status--error"
+                >
+                  {{ reviewMessage }}
+                </div>
+
+                <div
+                  v-else-if="
+                    realtimeReviews.length > 0
+                  "
+                  class="realtime-review-list"
+                >
+                  <article
+                    v-for="review in realtimeReviews"
+                    :key="review.id"
+                    class="realtime-review-card"
+                  >
+                    <div class="realtime-review-card__meta">
+                      <strong>
+                        {{ review.nickname }}
+                      </strong>
+
+                      <time
+                        :datetime="review.createdAt"
+                      >
+                        {{
+                          formatReviewDate(
+                            review.createdAt,
+                          )
+                        }}
+                      </time>
+                    </div>
+
+                    <h3>
+                      {{ review.title }}
+                    </h3>
+
+                    <p v-if="review.content">
+                      {{ review.content }}
+                    </p>
+
+                    <span class="realtime-review-card__comment">
+                      댓글
+                      {{ review.commentCount }}
+                    </span>
+                  </article>
+                </div>
+
+                <div
+                  v-else
+                  class="review-status"
+                >
+                  아직 등록된 후기가 없습니다.
                 </div>
               </section>
 
@@ -2285,6 +2495,152 @@ const openExternalMap = () => {
       #80918e
     );
   font-size: 11px;
+}
+
+.section-title-row {
+  display: flex;
+  margin-bottom: 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.section-title-row h2 {
+  margin: 0;
+}
+
+.section-title-row span {
+  flex-shrink: 0;
+  color:
+    var(
+      --color-text-muted,
+      #a1aeac
+    );
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.realtime-review-section {
+  padding-bottom: 2px;
+}
+
+.realtime-review-list {
+  display: grid;
+  gap: 9px;
+}
+
+.realtime-review-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid
+    var(
+      --color-border,
+      #dce9e6
+    );
+  border-radius: 12px;
+  background: #f8fcfb;
+}
+
+.realtime-review-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.realtime-review-card__meta strong {
+  min-width: 0;
+  overflow: hidden;
+  color:
+    var(
+      --color-primary,
+      #0d9f8c
+    );
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.realtime-review-card__meta time {
+  flex-shrink: 0;
+  color:
+    var(
+      --color-text-muted,
+      #a1aeac
+    );
+  font-size: 9px;
+}
+
+.realtime-review-card h3 {
+  display: -webkit-box;
+  margin: 8px 0 0;
+  overflow: hidden;
+  color:
+    var(
+      --color-text,
+      #173b38
+    );
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.realtime-review-card p {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  color:
+    var(
+      --color-text-subtle,
+      #657976
+    );
+  font-size: 10px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.realtime-review-card__comment {
+  display: inline-flex;
+  margin-top: 9px;
+  color:
+    var(
+      --color-text-muted,
+      #a1aeac
+    );
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.review-status {
+  padding: 12px;
+  border: 1px solid
+    var(
+      --color-border,
+      #dce9e6
+    );
+  border-radius: 12px;
+  background: #f8fcfb;
+  color:
+    var(
+      --color-text-subtle,
+      #80918e
+    );
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.review-status--error {
+  border-color:
+    rgba(
+      211,
+      76,
+      76,
+      0.18
+    );
+  background: #fff3f3;
+  color: #c34b4b;
 }
 
 .external-map-button {
